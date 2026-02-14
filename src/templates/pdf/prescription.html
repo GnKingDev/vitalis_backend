@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #333;
+      margin: 0;
+      padding: 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 3px solid #2c3e50;
+      padding-bottom: 20px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      color: #2c3e50;
+      font-weight: bold;
+    }
+    .header h2 {
+      margin: 5px 0 0 0;
+      font-size: 16px;
+      color: #7f8c8d;
+    }
+    .header h3 {
+      margin: 10px 0 0 0;
+      font-size: 18px;
+      color: #e74c3c;
+      font-weight: bold;
+    }
+    .patient-info {
+      margin-bottom: 20px;
+    }
+    .patient-info table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .patient-info td {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    .patient-info td:first-child {
+      font-weight: bold;
+      background-color: #f8f9fa;
+      width: 40%;
+    }
+    .section {
+      margin-bottom: 25px;
+    }
+    .section-title {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 10px;
+      padding: 8px;
+      background-color: #27ae60;
+      color: white;
+      border-radius: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 15px;
+    }
+    table th, table td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    table th {
+      background-color: #34495e;
+      color: white;
+      font-weight: bold;
+    }
+    table tr:nth-child(even) {
+      background-color: #f8f9fa;
+    }
+    .instructions {
+      font-style: italic;
+      color: #7f8c8d;
+      padding-left: 20px;
+    }
+    .notes {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #ecf0f1;
+      border-left: 4px solid #27ae60;
+    }
+    .footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 10px;
+      color: #7f8c8d;
+      border-top: 1px solid #ddd;
+      padding-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>VITALIS</h1>
+    <h2>Centre Médical</h2>
+    <h3>ORDONNANCE MÉDICALE</h3>
+  </div>
+
+  <div class="patient-info">
+    <table>
+      <tr>
+        <td>Nom du patient:</td>
+        <td>{{patientName}}</td>
+        <td>Âge:</td>
+        <td>{{patientAge}} ans</td>
+      </tr>
+      <tr>
+        <td>ID Patient:</td>
+        <td>{{vitalisId}}</td>
+        <td>Date:</td>
+        <td>{{prescriptionDate}}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Médicaments prescrits</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Médicament</th>
+          <th>Dosage</th>
+          <th>Fréquence</th>
+          <th>Durée</th>
+          <th>Quantité</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each items}}
+        <tr>
+          <td>{{medication}}</td>
+          <td>{{dosage}}</td>
+          <td>{{frequency}}</td>
+          <td>{{duration}}</td>
+          <td>{{quantity}}</td>
+        </tr>
+        {{#if instructions}}
+        <tr>
+          <td colspan="5" class="instructions">Instructions: {{instructions}}</td>
+        </tr>
+        {{/if}}
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  {{#if notes}}
+  <div class="notes">
+    <strong>Notes:</strong>
+    <p>{{notes}}</p>
+  </div>
+  {{/if}}
+
+  <div class="footer">
+    <p>Prescrit par: {{doctorName}}</p>
+    <p>Document généré le {{generatedDate}}</p>
+    <p>VITALIS - Centre Médical</p>
+  </div>
+</body>
+</html>

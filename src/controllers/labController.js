@@ -1,0 +1,939 @@
+const { LabExam, LabRequest, LabRequestExam, LabResult, Patient, User, Consultation, Payment, ConsultationDossier } = require('../models');
+const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
+const { Op, Sequelize } = require('sequelize');
+
+// ========== ROUTES EXAMENS ==========
+
+/**
+ * Liste tous les examens de laboratoire
+ */
+exports.getAllExams = async (req, res, next) => {
+  try {
+    const { category, isActive } = req.query;
+    const where = {};
+    
+    if (category) {
+      where.category = category;
+    }
+    if (isActive !== undefined) {
+      where.isActive = isActive === 'true';
+    } else {
+      where.isActive = true;
+    }
+    
+    const exams = await LabExam.findAll({
+      where,
+      order: [['category', 'ASC'], ['name', 'ASC']]
+    });
+    
+    res.json(successResponse(exams));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Créer un nouvel examen (admin uniquement)
+ */
+exports.createExam = async (req, res, next) => {
+  try {
+    const { name, category, price, description } = req.body;
+    
+    if (!name || !category || price === undefined) {
+      return res.status(400).json(
+        errorResponse('name, category et price sont requis', 400)
+      );
+    }
+    
+    if (price < 0) {
+      return res.status(400).json(
+        errorResponse('Le prix doit être positif', 400)
+      );
+    }
+    
+    const exam = await LabExam.create({
+      name,
+      category,
+      price,
+      description: description || null
+    });
+    
+    res.status(201).json(successResponse({
+      id: exam.id,
+      name: exam.name,
+      category: exam.category,
+      price: exam.price,
+      createdAt: exam.createdAt
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Modifier un examen (admin uniquement)
+ */
+exports.updateExam = async (req, res, next) => {
+  try {
+    const exam = await LabExam.findByPk(req.params.id);
+    
+    if (!exam) {
+      return res.status(404).json(
+        errorResponse('Examen non trouvé', 404)
+      );
+    }
+    
+    const { name, category, price, description, isActive } = req.body;
+    
+    await exam.update({
+      name: name || exam.name,
+      category: category || exam.category,
+      price: price !== undefined ? price : exam.price,
+      description: description !== undefined ? description : exam.description,
+      isActive: isActive !== undefined ? isActive : exam.isActive
+    });
+    
+    res.json(successResponse(exam));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ========== ROUTES DEMANDES ==========
+
+/**
+ * Liste toutes les demandes de laboratoire
+ */
+exports.getAllRequests = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, patientId, doctorId, status, date, search } = req.query;
+    const user = req.user;
+    
+    // Validation et limitation de la pagination
+    const pageNum = parseInt(page) || 1;
+    const limitNum = Math.min(parseInt(limit) || 10, 100);
+    const offset = (pageNum - 1) * limitNum;
+    
+    // Validation du patientId si fourni
+    if (patientId) {
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(patientId);
+      if (!isValidUUID) {
+        return res.status(400).json(
+          errorResponse('Format UUID invalide pour patientId', 400)
+        );
+      }
+    }
+    
+    const where = {};
+    
+    // Filtrage selon le rôle
+    if (user.role === 'lab') {
+      // Lab: voir uniquement les demandes avec paymentId et statut 'pending'
+      where.paymentId = { [Op.ne]: null };
+      where.status = 'pending';
+      // Le filtre status de la query est ignoré pour le lab (toujours 'pending')
+    } else if (user.role === 'doctor') {
+      // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
+      if (patientId) {
+        // Vérifier que le patient est assigné au médecin
+        const { DoctorAssignment } = require('../models');
+        const assignment = await DoctorAssignment.findOne({
+          where: {
+            patientId,
+            doctorId: user.id,
+            status: { [Op.in]: ['assigned', 'in_consultation', 'completed'] }
+          }
+        });
+        if (!assignment) {
+          return res.status(403).json(
+            errorResponse('Patient non assigné à ce médecin', 403)
+          );
+        }
+        // Filtrer par patient et médecin
+        where.patientId = patientId;
+        where.doctorId = user.id;
+      } else {
+        // Toujours filtrer par médecin
+        where.doctorId = user.id;
+      }
+      // Le médecin peut filtrer par status s'il est fourni
+      if (status) {
+        where.status = status;
+      }
+    } else {
+      // Reception et Admin: voir toutes les demandes avec filtres optionnels
+      if (patientId) {
+        where.patientId = patientId;
+      }
+      if (doctorId) {
+        where.doctorId = doctorId;
+      }
+      if (status) {
+        where.status = status;
+      }
+    }
+    if (date) {
+      const startDate = new Date(date);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(date);
+      endDate.setHours(23, 59, 59, 999);
+      where.createdAt = { [Op.between]: [startDate, endDate] };
+    }
+    
+    // Recherche textuelle dans les examens
+    const examWhere = {};
+    if (search) {
+      examWhere[Op.or] = [
+        { '$labExam.name$': { [Op.like]: `%${search}%` } },
+        { '$labExam.category$': { [Op.like]: `%${search}%` } }
+      ];
+    }
+    
+    // Debug: console.log les filtres appliqués
+    console.log('=== LAB REQUESTS DEBUG ===');
+    console.log('User role:', user.role);
+    console.log('Query params:', { page, limit, patientId, doctorId, status, date, search });
+    console.log('Where clause:', where);
+    console.log('Where clause paymentId:', where.paymentId);
+    console.log('Where clause status:', where.status);
+    
+    const { count, rows } = await LabRequest.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Patient,
+          as: 'patient',
+          attributes: ['id', 'vitalisId', 'firstName', 'lastName'],
+          ...(search && !patientId ? {
+            where: {
+              [Op.or]: [
+                { firstName: { [Op.like]: `%${search}%` } },
+                { lastName: { [Op.like]: `%${search}%` } },
+                { vitalisId: { [Op.like]: `%${search}%` } }
+              ]
+            }
+          } : {})
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: ['id', 'name', 'email'],
+          ...(search && !doctorId ? {
+            where: {
+              name: { [Op.like]: `%${search}%` }
+            }
+          } : {})
+        },
+        {
+          model: LabRequestExam,
+          as: 'exams',
+          include: [{
+            model: LabExam,
+            as: 'labExam',
+            attributes: ['id', 'name', 'category', 'price'],
+            where: Object.keys(examWhere).length > 0 ? examWhere : undefined,
+            required: Object.keys(examWhere).length > 0 ? false : false
+          }]
+        },
+        {
+          model: LabResult,
+          as: 'results',
+          attributes: ['id'],
+          required: false,
+          limit: 1,
+          order: [['createdAt', 'DESC']]
+        }
+      ],
+      limit: limitNum,
+      offset: offset,
+      order: [['createdAt', 'DESC']],
+      distinct: true
+    });
+    
+    console.log('Total count:', count);
+    console.log('Rows found:', rows.length);
+    
+    // Vérifier s'il y a des demandes dans la base sans filtre
+    const allRequestsCount = await LabRequest.count();
+    const pendingRequestsCount = await LabRequest.count({ where: { status: 'pending' } });
+    const withPaymentCount = await LabRequest.count({ where: { paymentId: { [Op.ne]: null } } });
+    const pendingWithPaymentCount = await LabRequest.count({ 
+      where: { 
+        status: 'pending',
+        paymentId: { [Op.ne]: null }
+      } 
+    });
+    
+    console.log('📊 Statistiques globales:');
+    console.log(`   Total demandes: ${allRequestsCount}`);
+    console.log(`   Demandes pending: ${pendingRequestsCount}`);
+    console.log(`   Demandes avec paymentId: ${withPaymentCount}`);
+    console.log(`   Demandes pending + avec paymentId: ${pendingWithPaymentCount}`);
+    
+    if (rows.length > 0) {
+      console.log('First request sample:', {
+        id: rows[0].id,
+        status: rows[0].status,
+        patientId: rows[0].patientId,
+        doctorId: rows[0].doctorId,
+        paymentId: rows[0].paymentId,
+        examsCount: rows[0].exams ? rows[0].exams.length : 0
+      });
+    } else {
+      console.log('⚠️ Aucune demande trouvée avec ces critères');
+      console.log('💡 Vérifiez que les demandes ont bien un paymentId et le statut "pending"');
+      console.log('💡 Exécutez: npm run fix-lab-payments pour corriger les demandes existantes');
+    }
+    console.log('========================');
+    
+    // Formater les résultats
+    const requests = rows.map(request => ({
+      id: request.id,
+      patientId: request.patientId,
+      doctorId: request.doctorId,
+      consultationId: request.consultationId,
+      status: request.status,
+      totalAmount: request.totalAmount ? request.totalAmount.toString() : request.exams.reduce((sum, exam) => 
+        sum + parseFloat(exam.price || 0), 0
+      ).toString(),
+      paymentId: request.paymentId, // Inclure le paymentId
+      notes: null, // Le modèle LabRequest n'a pas de champ notes pour l'instant
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      exams: request.exams.map(exam => ({
+        id: exam.labExam.id,
+        name: exam.labExam.name,
+        category: exam.labExam.category,
+        price: exam.price ? exam.price.toString() : exam.labExam.price.toString()
+      })),
+      doctor: request.doctor ? {
+        id: request.doctor.id,
+        name: request.doctor.name,
+        email: request.doctor.email
+      } : null,
+      patient: request.patient ? {
+        id: request.patient.id,
+        firstName: request.patient.firstName,
+        lastName: request.patient.lastName,
+        vitalisId: request.patient.vitalisId
+      } : null,
+      resultId: request.results && request.results.length > 0 ? request.results[0].id : null
+    }));
+    
+    res.json(paginatedResponse({ requests }, { page: pageNum, limit: limitNum }, count));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Récupérer les détails d'une demande
+ */
+exports.getRequestById = async (req, res, next) => {
+  try {
+    const request = await LabRequest.findByPk(req.params.id, {
+      include: [
+        {
+          model: Patient,
+          as: 'patient'
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: { exclude: ['password'] }
+        },
+        {
+          model: Consultation,
+          as: 'consultation',
+          required: false
+        },
+        {
+          model: Payment,
+          as: 'payment',
+          required: false
+        },
+        {
+          model: LabRequestExam,
+          as: 'exams',
+          include: [{
+            model: LabExam,
+            as: 'labExam'
+          }]
+        },
+        {
+          model: LabResult,
+          as: 'results',
+          required: false,
+          include: [{
+            model: User,
+            as: 'validator',
+            attributes: ['id', 'name', 'email'],
+            required: false
+          }]
+        }
+      ]
+    });
+    
+    if (!request) {
+      return res.status(404).json(
+        errorResponse('Demande non trouvée', 404)
+      );
+    }
+    
+    res.json(successResponse({
+      id: request.id,
+      patient: request.patient,
+      doctor: request.doctor,
+      consultation: request.consultation,
+      status: request.status,
+      exams: request.exams.map(exam => ({
+        id: exam.labExam.id,
+        name: exam.labExam.name,
+        category: exam.labExam.category,
+        price: exam.price
+      })),
+      totalAmount: request.totalAmount,
+      payment: request.payment,
+      results: request.results && request.results.length > 0 ? request.results[0] : null,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Créer une nouvelle demande de laboratoire
+ */
+exports.createRequest = async (req, res, next) => {
+  try {
+    const { patientId, doctorId, consultationId, examIds, notes } = req.body;
+    
+    if (!patientId || !doctorId || !examIds || !Array.isArray(examIds) || examIds.length === 0) {
+      return res.status(400).json(
+        errorResponse('patientId, doctorId et examIds (tableau non vide) sont requis', 400)
+      );
+    }
+    
+    // Vérifier que le patient existe
+    const patient = await Patient.findByPk(patientId);
+    if (!patient) {
+      return res.status(404).json(
+        errorResponse('Patient non trouvé', 404)
+      );
+    }
+    
+    // Vérifier que le médecin existe
+    const doctor = await User.findByPk(doctorId);
+    if (!doctor) {
+      return res.status(404).json(
+        errorResponse('Médecin non trouvé', 404)
+      );
+    }
+    
+    // Vérifier que le dossier n'est pas archivé
+    // Si consultationId est fourni, vérifier le dossier associé
+    if (consultationId) {
+      const dossier = await ConsultationDossier.findOne({
+        where: {
+          consultationId: consultationId
+        }
+      });
+      
+      if (dossier && dossier.status === 'archived') {
+        return res.status(400).json(
+          errorResponse('Impossible de créer une demande de laboratoire pour un dossier archivé', 400)
+        );
+      }
+    } else {
+      // Si pas de consultationId, vérifier s'il existe un dossier actif (non archivé) pour ce patient et ce médecin
+      const activeDossier = await ConsultationDossier.findOne({
+        where: {
+          patientId,
+          doctorId,
+          status: { [Op.in]: ['active', 'completed'] }
+        },
+        order: [['createdAt', 'DESC']]
+      });
+      
+      // Si aucun dossier actif n'existe, on permet quand même la création
+      // (le système permet plusieurs demandes pour un même patient)
+      // Mais si le dernier dossier est archivé, on empêche
+      if (activeDossier && activeDossier.status === 'archived') {
+        return res.status(400).json(
+          errorResponse('Impossible de créer une demande de laboratoire. Le dossier du patient est archivé.', 400)
+        );
+      }
+    }
+    
+    // Vérifier que tous les examens existent et sont actifs
+    const exams = await LabExam.findAll({
+      where: {
+        id: { [Op.in]: examIds },
+        isActive: true
+      }
+    });
+    
+    if (exams.length !== examIds.length) {
+      return res.status(400).json(
+        errorResponse('Un ou plusieurs examens sont invalides ou inactifs', 400)
+      );
+    }
+    
+    // Calculer le montant total
+    const totalAmount = exams.reduce((sum, exam) => sum + parseFloat(exam.price), 0);
+    
+    // Créer automatiquement un paiement pour cette demande
+    const payment = await Payment.create({
+      patientId,
+      amount: totalAmount,
+      method: 'cash', // Par défaut, sera modifié à la réception
+      status: 'pending',
+      type: 'lab',
+      reference: `LAB-${Date.now()}`,
+      relatedId: null, // Sera mis à jour après création de la demande
+      createdBy: doctorId // Le médecin qui crée la demande
+    });
+    
+    // Créer la demande avec le paymentId
+    const labRequest = await LabRequest.create({
+      patientId,
+      doctorId,
+      consultationId: consultationId || null,
+      status: 'pending',
+      totalAmount,
+      paymentId: payment.id
+    });
+    
+    // Mettre à jour le paiement avec le relatedId
+    await payment.update({
+      relatedId: labRequest.id
+    });
+    
+    // Créer les enregistrements dans la table de liaison
+    await Promise.all(
+      exams.map(exam =>
+        LabRequestExam.create({
+          labRequestId: labRequest.id,
+          labExamId: exam.id,
+          price: exam.price
+        })
+      )
+    );
+    
+    // Récupérer la demande avec les relations
+    const requestWithRelations = await LabRequest.findByPk(labRequest.id, {
+      include: [
+        {
+          model: LabRequestExam,
+          as: 'exams',
+          include: [{
+            model: LabExam,
+            as: 'labExam'
+          }]
+        },
+        {
+          model: Payment,
+          as: 'payment',
+          required: false
+        }
+      ]
+    });
+    
+    res.status(201).json(successResponse({
+      id: requestWithRelations.id,
+      patientId: requestWithRelations.patientId,
+      doctorId: requestWithRelations.doctorId,
+      status: requestWithRelations.status,
+      totalAmount: requestWithRelations.totalAmount,
+      payment: requestWithRelations.payment ? {
+        id: requestWithRelations.payment.id,
+        amount: requestWithRelations.payment.amount,
+        method: requestWithRelations.payment.method,
+        status: requestWithRelations.payment.status,
+        type: requestWithRelations.payment.type,
+        reference: requestWithRelations.payment.reference
+      } : null,
+      exams: requestWithRelations.exams.map(exam => ({
+        id: exam.labExam.id,
+        name: exam.labExam.name,
+        category: exam.labExam.category,
+        price: exam.price
+      })),
+      createdAt: requestWithRelations.createdAt
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Assigner une demande à un technicien
+ */
+exports.assignRequest = async (req, res, next) => {
+  try {
+    const { labTechnicianId } = req.body;
+    
+    if (!labTechnicianId) {
+      return res.status(400).json(
+        errorResponse('labTechnicianId est requis', 400)
+      );
+    }
+    
+    const request = await LabRequest.findByPk(req.params.id, {
+      include: [{
+        model: Payment,
+        as: 'payment',
+        required: false
+      }]
+    });
+    
+    if (!request) {
+      return res.status(404).json(
+        errorResponse('Demande non trouvée', 404)
+      );
+    }
+    
+    // Vérifier que la demande a un paiement et que ce paiement est payé
+    if (!request.paymentId) {
+      return res.status(400).json(
+        errorResponse('La demande doit avoir un paiement pour être assignée', 400)
+      );
+    }
+    
+    if (!request.payment) {
+      return res.status(400).json(
+        errorResponse('Le paiement associé à cette demande n\'existe plus', 400)
+      );
+    }
+    
+    if (request.payment.status !== 'paid') {
+      return res.status(400).json(
+        errorResponse(`Cette demande n'est pas encore payée. Statut du paiement: ${request.payment.status}`, 400)
+      );
+    }
+    
+    // Vérifier que le technicien existe et a le rôle 'lab'
+    const technician = await User.findByPk(labTechnicianId);
+    if (!technician || technician.role !== 'lab') {
+      return res.status(400).json(
+        errorResponse('Technicien invalide ou n\'a pas le rôle lab', 400)
+      );
+    }
+    
+    if (!technician.isActive) {
+      return res.status(400).json(
+        errorResponse('Technicien inactif', 400)
+      );
+    }
+    
+    await request.update({ labTechnicianId });
+    
+    res.json(successResponse(null, 'Demande assignée avec succès'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ========== ROUTES RÉSULTATS ==========
+
+/**
+ * Liste tous les résultats de laboratoire
+ */
+exports.getAllResults = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, patientId, doctorId, status, search } = req.query;
+    const offset = (page - 1) * limit;
+    
+    const where = {};
+    
+    if (patientId) {
+      where['$labRequest.patientId$'] = patientId;
+    }
+    if (doctorId) {
+      where['$labRequest.doctorId$'] = doctorId;
+    }
+    if (status) {
+      where.status = status;
+    }
+    
+    const { count, rows } = await LabResult.findAndCountAll({
+      where,
+      include: [
+        {
+          model: LabRequest,
+          as: 'labRequest',
+          include: [
+            {
+              model: Patient,
+              as: 'patient',
+              attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+            },
+            {
+              model: User,
+              as: 'doctor',
+              attributes: ['id', 'name', 'email']
+            }
+          ]
+        }
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['completedAt', 'DESC']],
+      distinct: true
+    });
+    
+    const results = rows.map(result => ({
+      id: result.id,
+      labRequest: {
+        id: result.labRequest.id,
+        patient: result.labRequest.patient,
+        doctor: result.labRequest.doctor
+      },
+      status: result.status,
+      completedAt: result.completedAt
+    }));
+    
+    res.json(paginatedResponse({ results }, { page: parseInt(page), limit: parseInt(limit) }, count));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Récupérer les détails d'un résultat
+ */
+exports.getResultById = async (req, res, next) => {
+  try {
+    const result = await LabResult.findByPk(req.params.id, {
+      include: [
+        {
+          model: LabRequest,
+          as: 'labRequest',
+          include: [
+            {
+              model: Patient,
+              as: 'patient'
+            },
+            {
+              model: User,
+              as: 'doctor',
+              attributes: { exclude: ['password'] }
+            },
+            {
+              model: LabRequestExam,
+              as: 'exams',
+              include: [{
+                model: LabExam,
+                as: 'labExam'
+              }]
+            }
+          ]
+        },
+        {
+          model: User,
+          as: 'validator',
+          attributes: ['id', 'name', 'email'],
+          required: false
+        }
+      ]
+    });
+    
+    if (!result) {
+      return res.status(404).json(
+        errorResponse('Résultat non trouvé', 404)
+      );
+    }
+    
+    res.json(successResponse({
+      id: result.id,
+      labRequest: {
+        id: result.labRequest.id,
+        patient: result.labRequest.patient,
+        doctor: result.labRequest.doctor,
+        exams: result.labRequest.exams.map(exam => ({
+          id: exam.labExam.id,
+          name: exam.labExam.name,
+          category: exam.labExam.category
+        }))
+      },
+      status: result.status,
+      results: result.results,
+      technicianNotes: result.technicianNotes,
+      validatedBy: result.validator,
+      validatedAt: result.validatedAt,
+      sentAt: result.sentAt,
+      completedAt: result.completedAt
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Créer ou mettre à jour un résultat
+ */
+exports.createOrUpdateResult = async (req, res, next) => {
+  try {
+    const { labRequestId, results, technicianNotes } = req.body;
+    const user = req.user;
+    
+    if (!labRequestId || !results) {
+      return res.status(400).json(
+        errorResponse('labRequestId et results sont requis', 400)
+      );
+    }
+    
+    // Vérifier que la demande existe
+    const labRequest = await LabRequest.findByPk(labRequestId, {
+      include: [
+        {
+          model: User,
+          as: 'labTechnician'
+        },
+        {
+          model: Payment,
+          as: 'payment',
+          required: false
+        }
+      ]
+    });
+    
+    if (!labRequest) {
+      return res.status(404).json(
+        errorResponse('Demande non trouvée', 404)
+      );
+    }
+    
+    // Vérifier que la demande est payée
+    if (!labRequest.paymentId) {
+      return res.status(400).json(
+        errorResponse('Cette demande n\'a pas de paiement associé', 400)
+      );
+    }
+    
+    if (!labRequest.payment) {
+      return res.status(400).json(
+        errorResponse('Le paiement associé à cette demande n\'existe plus', 400)
+      );
+    }
+    
+    if (labRequest.payment.status !== 'paid') {
+      return res.status(400).json(
+        errorResponse(`Cette demande n'est pas encore payée. Elle ne peut pas être traitée pour le moment. Statut du paiement: ${labRequest.payment.status}`, 400)
+      );
+    }
+    
+    // Vérifier que l'utilisateur est le technicien assigné ou admin
+    if (user.role !== 'admin' && labRequest.labTechnicianId !== user.id) {
+      return res.status(403).json(
+        errorResponse('Vous n\'êtes pas autorisé à modifier ce résultat', 403)
+      );
+    }
+    
+    // Chercher un résultat existant
+    let labResult = await LabResult.findOne({
+      where: { labRequestId }
+    });
+    
+    if (labResult) {
+      // Mettre à jour
+      await labResult.update({
+        results,
+        technicianNotes: technicianNotes || labResult.technicianNotes,
+        status: 'draft'
+      });
+    } else {
+      // Créer
+      labResult = await LabResult.create({
+        labRequestId,
+        results,
+        technicianNotes: technicianNotes || null,
+        status: 'draft'
+      });
+    }
+    
+    res.status(201).json(successResponse({
+      id: labResult.id,
+      labRequestId: labResult.labRequestId,
+      status: labResult.status,
+      completedAt: labResult.completedAt
+    }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Valider un résultat (lab uniquement)
+ */
+exports.validateResult = async (req, res, next) => {
+  try {
+    const user = req.user;
+    
+    if (user.role !== 'lab' && user.role !== 'admin') {
+      return res.status(403).json(
+        errorResponse('Seuls les techniciens de laboratoire peuvent valider les résultats', 403)
+      );
+    }
+    
+    const result = await LabResult.findByPk(req.params.id);
+    if (!result) {
+      return res.status(404).json(
+        errorResponse('Résultat non trouvé', 404)
+      );
+    }
+    
+    await result.update({
+      status: 'validated',
+      validatedBy: user.id,
+      validatedAt: new Date()
+    });
+    
+    res.json(successResponse(null, 'Résultat validé avec succès'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Envoyer un résultat au médecin
+ */
+exports.sendResult = async (req, res, next) => {
+  try {
+    const result = await LabResult.findByPk(req.params.id, {
+      include: [{
+        model: LabRequest,
+        as: 'labRequest'
+      }]
+    });
+    
+    if (!result) {
+      return res.status(404).json(
+        errorResponse('Résultat non trouvé', 404)
+      );
+    }
+    
+    if (result.status !== 'validated') {
+      return res.status(400).json(
+        errorResponse('Le résultat doit être validé avant d\'être envoyé', 400)
+      );
+    }
+    
+    // Mettre à jour le résultat
+    await result.update({
+      status: 'sent',
+      sentAt: new Date()
+    });
+    
+    // Mettre à jour la demande
+    await result.labRequest.update({
+      status: 'sent_to_doctor'
+    });
+    
+    res.json(successResponse(null, 'Résultat envoyé au médecin'));
+  } catch (error) {
+    next(error);
+  }
+};
