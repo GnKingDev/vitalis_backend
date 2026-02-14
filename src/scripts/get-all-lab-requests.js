@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const { LabRequest, LabRequestExam, LabExam, Patient, User, LabResult, Payment, sequelize } = require('../models');
 const { Op } = require('sequelize');
 

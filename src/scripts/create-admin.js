@@ -8,7 +8,8 @@
  *   node src/scripts/create-admin.js --name "Admin User" --email "admin@vitalis.com" --password "password123"
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const models = require('../models');
 const { User, sequelize } = models;
 const readline = require('readline');
