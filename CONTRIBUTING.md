@@ -15,9 +15,9 @@ Merci de votre intérêt pour contribuer au projet VITALIS Backend !
 
 - Un fichier par modèle/contrôleur/service
 - Organiser les routes par domaine fonctionnel
-- Garder les fonctions courtes et focalisées
+- Garder les fonctions courtes et focalisées 
 
-## Processus de Contribution
+## Processus de Contribution  
 
 1. **Fork** le repository
 2. **Créer une branche** pour votre fonctionnalité (`git checkout -b feature/ma-fonctionnalite`)
@@ -41,8 +41,8 @@ Merci de votre intérêt pour contribuer au projet VITALIS Backend !
 ## Documentation
 
 - Mettre à jour la documentation si nécessaire
-- Ajouter des commentaires JSDoc pour les fonctions publiques
+- Ajouter des commentaires JSDoc pour les fonctions publiques 
 
-## Questions
+## Questions 
 
 Pour toute question, ouvrir une issue sur le repository.

@@ -13,6 +13,7 @@ router.get('/:id', consultationController.getConsultationById);
 router.post('/', consultationController.createConsultation);
 router.put('/:id', consultationController.updateConsultation);
 router.patch('/:id/complete', consultationController.completeConsultation);
+router.post('/:id/complete', consultationController.completeConsultation);
 
 // Routes dossiers
 router.patch('/dossiers/:id/complete', consultationController.completeDossier);

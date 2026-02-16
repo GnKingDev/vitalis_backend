@@ -149,17 +149,35 @@ exports.getAllResults = async (req, res, next) => {
 };
 
 /**
- * Récupérer les détails d'un résultat (lab ou imaging)
+ * Récupérer les détails d'un résultat (lab ou imaging).
+ * Si type n'est pas fourni en query, on tente lab puis imaging (auto-détection).
  */
 exports.getResultById = async (req, res, next) => {
   try {
-    const { type } = req.query;
+    let { type } = req.query;
     const user = req.user;
     const resultId = req.params.id;
     
+    // Auto-détection du type si non fourni : essayer lab puis imaging
     if (!type || (type !== 'lab' && type !== 'imaging')) {
-      return res.status(400).json(
-        errorResponse('type doit être lab ou imaging', 400)
+      const labRequest = await LabRequest.findOne({
+        where: { id: resultId, doctorId: user.id, status: 'sent_to_doctor' }
+      });
+      if (labRequest) {
+        type = 'lab';
+      } else {
+        const imagingRequest = await ImagingRequest.findOne({
+          where: { id: resultId, doctorId: user.id, status: 'sent_to_doctor' }
+        });
+        if (imagingRequest) {
+          type = 'imaging';
+        }
+      }
+    }
+    
+    if (!type || (type !== 'lab' && type !== 'imaging')) {
+      return res.status(404).json(
+        errorResponse('Résultat non trouvé ou non accessible', 404)
       );
     }
     
@@ -214,8 +232,23 @@ exports.getResultById = async (req, res, next) => {
         );
       }
       
-      const result = labRequest.results && labRequest.results.length > 0 ? labRequest.results[0] : null;
-      
+      // Toujours renvoyer results comme tableau pour le frontend (ex: .filter, .map)
+      const resultsList = Array.isArray(labRequest.results)
+        ? labRequest.results
+        : labRequest.results
+          ? [labRequest.results]
+          : [];
+      const resultsPayload = resultsList.map((result) => ({
+        id: result.id,
+        results: result.results || {},
+        technicianNotes: result.technicianNotes,
+        validatedBy: result.validator,
+        validatedAt: result.validatedAt,
+        completedAt: result.completedAt,
+        createdAt: result.createdAt
+      }));
+      const lastResult = resultsList.length > 0 ? resultsList[resultsList.length - 1] : null;
+
       res.json(successResponse({
         type: 'lab',
         patient: labRequest.patient,
@@ -223,22 +256,16 @@ exports.getResultById = async (req, res, next) => {
         request: {
           id: labRequest.id,
           status: labRequest.status,
-          exams: labRequest.exams.map(exam => ({
-            id: exam.labExam.id,
-            name: exam.labExam.name,
-            category: exam.labExam.category,
+          exams: (labRequest.exams || []).map(exam => ({
+            id: exam.labExam?.id,
+            name: exam.labExam?.name,
+            category: exam.labExam?.category,
             price: exam.price
           })),
           totalAmount: labRequest.totalAmount
         },
-        results: result ? {
-          id: result.id,
-          values: result.values,
-          notes: result.notes,
-          validatedBy: result.validator,
-          validatedAt: result.createdAt
-        } : null,
-        completedAt: result ? result.createdAt : labRequest.updatedAt
+        results: resultsPayload,
+        completedAt: lastResult ? (lastResult.completedAt || lastResult.createdAt) : labRequest.updatedAt
       }));
     } else {
       const imagingRequest = await ImagingRequest.findByPk(resultId, {

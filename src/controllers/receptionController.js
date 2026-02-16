@@ -427,43 +427,36 @@ exports.createPayment = async (req, res, next) => {
 exports.getAllPayments = async (req, res, next) => {
   try {
     console.log('=== GET ALL PAYMENTS DEBUG ===');
-    const { page = 1, limit = 10, date, type, status, search } = req.query;
-    console.log('Query params:', { page, limit, date, type, status, search });
+    const { page = 1, limit = 10, date, type, status, search, filterByDate } = req.query;
+    console.log('Query params:', { page, limit, date, type, status, search, filterByDate });
     
     const offset = (page - 1) * limit;
     
     const where = {};
     
-    // Filtrer par date si fournie
-    if (date) {
+    // Filtrer par date uniquement si demandé explicitement (filterByDate=1 ou true)
+    // Sinon on affiche tout (première requête = pas de filtre date)
+    const applyDateFilter = filterByDate === '1' || filterByDate === 'true';
+    if (applyDateFilter && date) {
       try {
         console.log('📅 Filtre par date:', date);
-        // Parser la date en UTC pour correspondre aux dates stockées en base
         const dateParts = date.split('-');
         if (dateParts.length === 3) {
           const year = parseInt(dateParts[0]);
-          const month = parseInt(dateParts[1]) - 1; // Les mois sont 0-indexés
+          const month = parseInt(dateParts[1]) - 1;
           const day = parseInt(dateParts[2]);
-          
-          // Créer les dates en UTC
           const startDate = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
           const endDate = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-          
-          console.log('  - startDate (UTC):', startDate.toISOString());
-          console.log('  - endDate (UTC):', endDate.toISOString());
-          console.log('  - startDate (local):', startDate.toString());
-          console.log('  - endDate (local):', endDate.toString());
-          
           if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
             where.createdAt = { [Op.between]: [startDate, endDate] };
             console.log('  ✅ Filtre de date appliqué');
-          } else {
-            console.log('  ❌ Dates invalides');
           }
         }
       } catch (error) {
         console.warn('❌ Erreur lors du parsing de la date, filtre ignoré:', date, error);
       }
+    } else if (date && !applyDateFilter) {
+      console.log('📅 Date fournie mais filtre non appliqué (première requête = tout afficher)');
     }
     
     // Filtrer par type si spécifié

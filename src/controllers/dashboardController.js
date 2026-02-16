@@ -38,7 +38,9 @@ exports.getDashboardStats = async (req, res, next) => {
       
       case 'lab':
         // Statistiques pour le laboratoire
+        console.log('🔬 Appel de getLabStats pour le rôle lab');
         stats = await getLabStats(today, tomorrow, startOfMonth);
+        console.log('🔬 Résultat de getLabStats:', JSON.stringify(stats, null, 2));
         break;
       
       case 'pharmacy':
@@ -53,10 +55,12 @@ exports.getDashboardStats = async (req, res, next) => {
         });
     }
 
-    res.json(successResponse({
+    const response = {
       role,
       stats
-    }));
+    };
+    console.log('📊 Réponse finale du dashboard:', JSON.stringify(response, null, 2));
+    res.json(successResponse(response));
   } catch (error) {
     next(error);
   }
@@ -259,6 +263,22 @@ async function getDoctorStats(doctorId, today, tomorrow, startOfMonth) {
  * Statistiques pour le laboratoire
  */
 async function getLabStats(today, tomorrow, startOfMonth) {
+  // Debug: Vérifier toutes les demandes avec leurs statuts
+  const allRequests = await LabRequest.findAll({
+    attributes: ['id', 'status', 'paymentId', 'createdAt'],
+    include: [{
+      model: Payment,
+      as: 'payment',
+      attributes: ['id', 'status'],
+      required: false
+    }]
+  });
+  
+  console.log('📊 DEBUG getLabStats - Toutes les demandes:');
+  allRequests.forEach(req => {
+    console.log(`  - ID: ${req.id}, Status: ${req.status}, PaymentId: ${req.paymentId}, PaymentStatus: ${req.payment ? req.payment.status : 'N/A'}`);
+  });
+  
   const [
     totalLabRequests,
     pendingLabRequests,
@@ -267,8 +287,33 @@ async function getLabStats(today, tomorrow, startOfMonth) {
     monthLabRequests
   ] = await Promise.all([
     LabRequest.count(),
-    LabRequest.count({ where: { status: 'pending' } }),
-    LabRequest.count({ where: { status: 'sent_to_doctor' } }),
+    // Compter seulement les demandes pending avec paiement payé
+    LabRequest.count({
+      where: { 
+        status: 'pending',
+        paymentId: { [Op.ne]: null }
+      },
+      include: [{
+        model: Payment,
+        as: 'payment',
+        where: { status: 'paid' },
+        required: true
+      }]
+    }),
+    (async () => {
+      const count = await LabRequest.count({ where: { status: 'sent_to_doctor' } });
+      console.log('🔍 DEBUG - Comptage sent_to_doctor:', count);
+      const allSent = await LabRequest.findAll({ 
+        where: { status: 'sent_to_doctor' },
+        attributes: ['id', 'status', 'createdAt']
+      });
+      console.log('🔍 DEBUG - Toutes les demandes sent_to_doctor:', allSent.map(r => ({
+        id: r.id,
+        status: r.status,
+        createdAt: r.createdAt
+      })));
+      return count;
+    })(),
     LabRequest.count({ 
       where: { 
         createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } 
@@ -280,6 +325,13 @@ async function getLabStats(today, tomorrow, startOfMonth) {
       } 
     })
   ]);
+  
+  console.log(`📊 getLabStats - Résultats:`);
+  console.log(`   totalLabRequests: ${totalLabRequests}`);
+  console.log(`   pendingLabRequests: ${pendingLabRequests}`);
+  console.log(`   completedLabRequests: ${completedLabRequests}`);
+  console.log(`   todayLabRequests: ${todayLabRequests}`);
+  console.log(`   monthLabRequests: ${monthLabRequests}`);
 
   return {
     lab: {

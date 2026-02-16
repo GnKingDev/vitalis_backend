@@ -128,10 +128,16 @@ exports.getAllRequests = async (req, res, next) => {
     
     // Filtrage selon le rôle
     if (user.role === 'lab') {
-      // Lab: voir uniquement les demandes avec paymentId et statut 'pending'
+      // Lab: voir uniquement les demandes avec paymentId
       where.paymentId = { [Op.ne]: null };
-      where.status = 'pending';
-      // Le filtre status de la query est ignoré pour le lab (toujours 'pending')
+      // Le lab peut voir les demandes 'pending' ou 'sent_to_doctor' selon le paramètre status
+      if (status && (status === 'pending' || status === 'sent_to_doctor')) {
+        where.status = status;
+      } else {
+        // Par défaut, montrer les demandes 'pending'
+        where.status = 'pending';
+      }
+      // Le filtre date est ignoré pour le lab (voir toutes les demandes, peu importe la date)
     } else if (user.role === 'doctor') {
       // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
       if (patientId) {
@@ -172,13 +178,16 @@ exports.getAllRequests = async (req, res, next) => {
         where.status = status;
       }
     }
-    if (date) {
+    // Pour le rôle lab, ne jamais appliquer le filtre de date
+    // car on veut voir toutes les demandes en attente, peu importe leur date de création
+    if (date && user.role !== 'lab') {
       const startDate = new Date(date);
       startDate.setHours(0, 0, 0, 0);
       const endDate = new Date(date);
       endDate.setHours(23, 59, 59, 999);
       where.createdAt = { [Op.between]: [startDate, endDate] };
     }
+    // Note: Pour le rôle lab, le paramètre date est complètement ignoré
     
     // Recherche textuelle dans les examens
     const examWhere = {};
@@ -190,12 +199,10 @@ exports.getAllRequests = async (req, res, next) => {
     }
     
     // Debug: console.log les filtres appliqués
-    console.log('=== LAB REQUESTS DEBUG ===');
-    console.log('User role:', user.role);
-    console.log('Query params:', { page, limit, patientId, doctorId, status, date, search });
-    console.log('Where clause:', where);
-    console.log('Where clause paymentId:', where.paymentId);
-    console.log('Where clause status:', where.status);
+    console.log('🔬 === LAB REQUESTS DEBUG ===');
+    console.log('🔬 User role:', user.role);
+    console.log('🔬 Query params:', { page, limit, patientId, doctorId, status, date, search });
+    console.log('🔬 Where clause final:', JSON.stringify(where, null, 2));
     
     const { count, rows } = await LabRequest.findAndCountAll({
       where,
@@ -242,7 +249,15 @@ exports.getAllRequests = async (req, res, next) => {
           required: false,
           limit: 1,
           order: [['createdAt', 'DESC']]
-        }
+        },
+        // Pour le rôle lab, inclure Payment pour vérifier le statut
+        ...(user.role === 'lab' ? [{
+          model: Payment,
+          as: 'payment',
+          attributes: ['id', 'status'],
+          where: { status: 'paid' },
+          required: true
+        }] : [])
       ],
       limit: limitNum,
       offset: offset,
@@ -250,41 +265,39 @@ exports.getAllRequests = async (req, res, next) => {
       distinct: true
     });
     
-    console.log('Total count:', count);
-    console.log('Rows found:', rows.length);
-    
-    // Vérifier s'il y a des demandes dans la base sans filtre
-    const allRequestsCount = await LabRequest.count();
-    const pendingRequestsCount = await LabRequest.count({ where: { status: 'pending' } });
-    const withPaymentCount = await LabRequest.count({ where: { paymentId: { [Op.ne]: null } } });
-    const pendingWithPaymentCount = await LabRequest.count({ 
-      where: { 
-        status: 'pending',
-        paymentId: { [Op.ne]: null }
-      } 
-    });
-    
-    console.log('📊 Statistiques globales:');
-    console.log(`   Total demandes: ${allRequestsCount}`);
-    console.log(`   Demandes pending: ${pendingRequestsCount}`);
-    console.log(`   Demandes avec paymentId: ${withPaymentCount}`);
-    console.log(`   Demandes pending + avec paymentId: ${pendingWithPaymentCount}`);
+    console.log('🔬 Total count from query:', count);
+    console.log('🔬 Rows found:', rows.length);
     
     if (rows.length > 0) {
-      console.log('First request sample:', {
+      console.log('🔬 First request found:', {
         id: rows[0].id,
         status: rows[0].status,
-        patientId: rows[0].patientId,
-        doctorId: rows[0].doctorId,
         paymentId: rows[0].paymentId,
-        examsCount: rows[0].exams ? rows[0].exams.length : 0
+        createdAt: rows[0].createdAt,
+        hasPayment: !!rows[0].payment,
+        paymentStatus: rows[0].payment ? rows[0].payment.status : 'N/A'
       });
     } else {
-      console.log('⚠️ Aucune demande trouvée avec ces critères');
-      console.log('💡 Vérifiez que les demandes ont bien un paymentId et le statut "pending"');
-      console.log('💡 Exécutez: npm run fix-lab-payments pour corriger les demandes existantes');
+      console.log('🔬 ⚠️ Aucune demande trouvée');
+      // Vérifier pourquoi
+      const allRequests = await LabRequest.findAll({
+        attributes: ['id', 'status', 'paymentId', 'createdAt'],
+        include: [{
+          model: Payment,
+          as: 'payment',
+          attributes: ['id', 'status'],
+          required: false
+        }],
+        limit: 5
+      });
+      console.log('🔬 Toutes les demandes dans la base (échantillon):', allRequests.map(r => ({
+        id: r.id,
+        status: r.status,
+        paymentId: r.paymentId,
+        paymentStatus: r.payment ? r.payment.status : 'N/A'
+      })));
     }
-    console.log('========================');
+    console.log('🔬 ================================');
     
     // Formater les résultats
     const requests = rows.map(request => ({
