@@ -86,6 +86,12 @@ router.get('/assignments', authMiddleware, authorize(['reception', 'admin']), pa
 router.post('/assignments', authMiddleware, authorize(['reception', 'admin']), receptionController.createAssignment);
 
 /**
+ * PUT /api/v1/reception/assignments/:id
+ * Modifier une assignation (changer le médecin)
+ */
+router.put('/assignments/:id', authMiddleware, authorize(['reception', 'admin']), receptionController.updateAssignment);
+
+/**
  * GET /api/v1/reception/doctors
  * Liste tous les médecins disponibles
  */

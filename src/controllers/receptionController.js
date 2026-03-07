@@ -1781,6 +1781,71 @@ exports.createAssignment = async (req, res, next) => {
 };
 
 /**
+ * Mettre à jour une assignation (changer le médecin)
+ */
+exports.updateAssignment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { doctorId } = req.body;
+    const user = req.user;
+
+    if (!doctorId) {
+      return res.status(400).json(
+        errorResponse('doctorId est requis', 400)
+      );
+    }
+
+    const assignment = await DoctorAssignment.findByPk(id, {
+      include: [{ model: ConsultationDossier, as: 'dossier', required: false }]
+    });
+
+    if (!assignment) {
+      return res.status(404).json(
+        errorResponse('Assignation non trouvée', 404)
+      );
+    }
+
+    if (!['assigned', 'in_consultation'].includes(assignment.status)) {
+      return res.status(400).json(
+        errorResponse('Seules les assignations en cours peuvent être modifiées', 400)
+      );
+    }
+
+    const doctor = await User.findByPk(doctorId);
+    if (!doctor || doctor.role !== 'doctor') {
+      return res.status(404).json(
+        errorResponse('Médecin non trouvé', 404)
+      );
+    }
+
+    await assignment.update({ doctorId });
+
+    const dossier = await ConsultationDossier.findOne({ where: { assignmentId: assignment.id } });
+    if (dossier) {
+      await dossier.update({ doctorId });
+    }
+
+    const updated = await DoctorAssignment.findByPk(assignment.id, {
+      include: [
+        { model: User, as: 'doctor', attributes: ['id', 'name', 'email', 'department'], required: false }
+      ]
+    });
+
+    res.json(successResponse({
+      id: updated.id,
+      patientId: updated.patientId,
+      doctorId: updated.doctorId,
+      paymentId: updated.paymentId,
+      status: updated.status,
+      doctor: updated.doctor,
+      updatedAt: updated.updatedAt
+    }, 'Assignation modifiée avec succès'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Liste tous les médecins disponibles
  */
 exports.getDoctors = async (req, res, next) => {
