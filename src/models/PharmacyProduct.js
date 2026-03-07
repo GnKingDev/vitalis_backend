@@ -28,6 +28,20 @@ const PharmacyProduct = sequelize.define('PharmacyProduct', {
       min: 0
     }
   },
+  salePrice: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    validate: {
+      min: 0
+    }
+  },
+  privatePrice: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    validate: {
+      min: 0
+    }
+  },
   stock: {
     type: DataTypes.INTEGER,
     allowNull: false,

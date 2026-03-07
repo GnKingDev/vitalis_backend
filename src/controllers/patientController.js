@@ -73,7 +73,15 @@ exports.getAllPatients = async (req, res, next) => {
       return { ...enriched, age: calculateAge(patient.dateOfBirth) };
     });
     
-    res.json(paginatedResponse(patients, { page: parseInt(page), limit: parseInt(limit) }, count));
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const pagination = {
+      currentPage: pageNum,
+      totalPages: Math.ceil(count / limitNum) || 1,
+      totalItems: count,
+      itemsPerPage: limitNum
+    };
+    res.json({ success: true, data: { patients, pagination } });
   } catch (error) {
     next(error);
   }
