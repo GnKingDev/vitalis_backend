@@ -329,9 +329,21 @@ exports.registerPatient = async (req, res, next) => {
       discountPercent
     });
     
-    // Montant de base consultation = prix depuis le modèle ConsultationPrice (table consultation_prices)
-    const consultationPrice = await ConsultationPrice.findOne({ where: { isActive: true } });
-    const baseAmount = consultationPrice ? Number(consultationPrice.price) : (Number(payment.amount) || 0);
+    // Montant de base = consultation + frais lit VIP si applicable
+    const consultationPriceRecord = await ConsultationPrice.findOne({ where: { isActive: true } });
+    const consultationPriceValue = consultationPriceRecord ? Number(consultationPriceRecord.price) : (Number(payment.amount) || 0);
+    let bedRecord = null;
+    if (bedId) {
+      bedRecord = await Bed.findByPk(bedId);
+      if (!bedRecord) {
+        return res.status(404).json(errorResponse('Lit non trouvé', 404));
+      }
+      if (bedRecord.isOccupied) {
+        return res.status(400).json(errorResponse('Le lit est déjà occupé', 400));
+      }
+    }
+    const bedAdditionalFee = bedRecord ? (Number(bedRecord.additionalFee) || 0) : 0;
+    const baseAmount = consultationPriceValue + bedAdditionalFee;
     const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
       insurancePercent: insuranceCoveragePercent || 0,
       discountPercent: discountPercent || 0
@@ -351,18 +363,7 @@ exports.registerPatient = async (req, res, next) => {
     });
     
     let bed = null;
-    if (bedId) {
-      const bedRecord = await Bed.findByPk(bedId);
-      if (!bedRecord) {
-        return res.status(404).json(
-          errorResponse('Lit non trouvé', 404)
-        );
-      }
-      if (bedRecord.isOccupied) {
-        return res.status(400).json(
-          errorResponse('Le lit est déjà occupé', 400)
-        );
-      }
+    if (bedId && bedRecord) {
       await bedRecord.update({
         isOccupied: true,
         patientId: patient.id
