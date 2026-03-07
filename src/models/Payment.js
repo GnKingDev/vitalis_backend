@@ -68,6 +68,11 @@ const Payment = sequelize.define('Payment', {
     allowNull: true,
     defaultValue: 0,
     comment: 'Montant déduit par la remise'
+  },
+  consultationTypeIds: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    comment: 'IDs des types de consultation (paiement type=consultation)'
   }
 }, {
   tableName: 'payments',

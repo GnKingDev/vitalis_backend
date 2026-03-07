@@ -1,4 +1,4 @@
-const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice } = require('../models');
+const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice, ConsultationType } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
 const { calculateAge } = require('../utils/ageCalculator');
@@ -84,7 +84,18 @@ exports.getAllPatients = async (req, res, next) => {
       ],
       distinct: true
     });
-    
+
+    const allConsultationTypeIds = [...new Set(rows.flatMap(p => {
+      const pay = p.payments && p.payments[0] ? p.payments[0] : null;
+      const ids = pay && pay.consultationTypeIds && Array.isArray(pay.consultationTypeIds) ? pay.consultationTypeIds : [];
+      return ids;
+    }))];
+    let consultationTypesMap = {};
+    if (allConsultationTypeIds.length > 0) {
+      const types = await ConsultationType.findAll({ where: { id: allConsultationTypeIds }, attributes: ['id', 'name', 'price'] });
+      types.forEach(t => { consultationTypesMap[t.id] = { id: t.id, name: t.name, price: Number(t.price) }; });
+    }
+
     const patients = rows.map(patient => {
       const payment = patient.payments && patient.payments.length > 0 ? patient.payments[0] : null;
       const rawAssignment = patient.doctorAssignments && patient.doctorAssignments.length > 0 ? patient.doctorAssignments[0] : null;
@@ -126,7 +137,10 @@ exports.getAllPatients = async (req, res, next) => {
           status: payment.status,
           method: payment.method,
           coveragePercent: paymentCoveragePercent,
-          discountPercent: paymentDiscountPercent
+          discountPercent: paymentDiscountPercent,
+          consultationTypes: payment.consultationTypeIds && Array.isArray(payment.consultationTypeIds)
+            ? payment.consultationTypeIds.map(id => consultationTypesMap[id]).filter(Boolean)
+            : []
         } : null,
         assignment: assignment ? {
           id: assignment.id,
@@ -233,6 +247,17 @@ exports.getPatientById = async (req, res, next) => {
     const payment = patient.payments && patient.payments.length > 0 ? patient.payments[0] : null;
     const assignment = patient.doctorAssignments && patient.doctorAssignments.length > 0 ? patient.doctorAssignments[0] : null;
     const base = enrichPatientForDisplay(patient);
+
+    let paymentDisplay = payment;
+    if (payment && payment.consultationTypeIds && Array.isArray(payment.consultationTypeIds) && payment.consultationTypeIds.length > 0) {
+      const types = await ConsultationType.findAll({ where: { id: payment.consultationTypeIds }, attributes: ['id', 'name', 'price'] });
+      paymentDisplay = {
+        ...payment.toJSON ? payment.toJSON() : payment,
+        consultationTypes: types.map(t => ({ id: t.id, name: t.name, price: Number(t.price) }))
+      };
+    } else if (payment) {
+      paymentDisplay = { ...(payment.toJSON ? payment.toJSON() : payment), consultationTypes: [] };
+    }
     
     res.json(successResponse({
       ...base,
@@ -248,7 +273,7 @@ exports.getPatientById = async (req, res, next) => {
       emergencyContact: patient.emergencyContact,
       age: calculateAge(patient.dateOfBirth),
       bed: patient.bed,
-      payment: payment,
+      payment: paymentDisplay,
       assignment: assignment ? {
         id: assignment.id,
         doctor: assignment.doctor,
@@ -329,9 +354,16 @@ exports.registerPatient = async (req, res, next) => {
       discountPercent
     });
     
-    // Montant de base = consultation + frais lit VIP si applicable
-    const consultationPriceRecord = await ConsultationPrice.findOne({ where: { isActive: true } });
-    const consultationPriceValue = consultationPriceRecord ? Number(consultationPriceRecord.price) : (Number(payment.amount) || 0);
+    // Montant de base = types de consultation sélectionnés + frais lit VIP si applicable
+    let consultationAmount = 0;
+    const consultationTypeIds = payment.consultationTypeIds && Array.isArray(payment.consultationTypeIds) ? payment.consultationTypeIds : [];
+    if (consultationTypeIds.length > 0) {
+      const types = await ConsultationType.findAll({ where: { id: consultationTypeIds, isActive: true } });
+      consultationAmount = types.reduce((sum, t) => sum + (Number(t.price) || 0), 0);
+    } else {
+      const consultationPriceRecord = await ConsultationPrice.findOne({ where: { isActive: true } });
+      consultationAmount = consultationPriceRecord ? Number(consultationPriceRecord.price) : (Number(payment.amount) || 0);
+    }
     let bedRecord = null;
     if (bedId) {
       bedRecord = await Bed.findByPk(bedId);
@@ -343,7 +375,7 @@ exports.registerPatient = async (req, res, next) => {
       }
     }
     const bedAdditionalFee = bedRecord ? (Number(bedRecord.additionalFee) || 0) : 0;
-    const baseAmount = consultationPriceValue + bedAdditionalFee;
+    const baseAmount = consultationAmount + bedAdditionalFee;
     const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
       insurancePercent: insuranceCoveragePercent || 0,
       discountPercent: discountPercent || 0
@@ -359,7 +391,8 @@ exports.registerPatient = async (req, res, next) => {
       createdBy: user.id,
       amountBase: amountBase,
       insuranceDeduction: insuranceDeduction,
-      discountDeduction: discountDeduction
+      discountDeduction: discountDeduction,
+      consultationTypeIds: consultationTypeIds.length > 0 ? consultationTypeIds : null
     });
     
     let bed = null;
@@ -515,8 +548,14 @@ exports.createPayment = async (req, res, next) => {
     
     let baseAmount = Number(amount) || 0;
     if (type === 'consultation') {
-      const consultationPrice = await ConsultationPrice.findOne({ where: { isActive: true } });
-      if (consultationPrice) baseAmount = Number(consultationPrice.price);
+      const consultationTypeIds = req.body.consultationTypeIds && Array.isArray(req.body.consultationTypeIds) ? req.body.consultationTypeIds : [];
+      if (consultationTypeIds.length > 0) {
+        const types = await ConsultationType.findAll({ where: { id: consultationTypeIds, isActive: true } });
+        baseAmount = types.reduce((sum, t) => sum + (Number(t.price) || 0), 0);
+      } else {
+        const consultationPrice = await ConsultationPrice.findOne({ where: { isActive: true } });
+        if (consultationPrice) baseAmount = Number(consultationPrice.price);
+      }
     }
     const overrides = {};
     if (insurance?.coveragePercent != null) overrides.insurancePercent = insurance.coveragePercent;
@@ -527,6 +566,9 @@ exports.createPayment = async (req, res, next) => {
       discountPercent
     });
     
+    const consultationTypeIdsForPayment = type === 'consultation' && req.body.consultationTypeIds && Array.isArray(req.body.consultationTypeIds) && req.body.consultationTypeIds.length > 0
+      ? req.body.consultationTypeIds
+      : null;
     const payment = await Payment.create({
       patientId,
       amount: finalAmount,
@@ -538,7 +580,8 @@ exports.createPayment = async (req, res, next) => {
       createdBy: user.id,
       amountBase,
       insuranceDeduction,
-      discountDeduction
+      discountDeduction,
+      consultationTypeIds: consultationTypeIdsForPayment
     });
     
     // Si relatedId fourni, lier le paiement à la ressource

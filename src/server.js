@@ -23,6 +23,7 @@ const userRoutes = require('./routes/users');
 const statsRoutes = require('./routes/stats');
 const bedRoutes = require('./routes/beds');
 const consultationPriceRoutes = require('./routes/consultationPrice');
+const consultationTypesRoutes = require('./routes/consultationTypes');
 const insuranceEstablishmentRoutes = require('./routes/insuranceEstablishments');
 const labNumberRoutes = require('./routes/labNumbers');
 
@@ -74,6 +75,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/stats', statsRoutes);
 app.use('/api/v1/beds', bedRoutes);
 app.use('/api/v1/consultation/price', consultationPriceRoutes);
+app.use('/api/v1/consultation/types', consultationTypesRoutes);
 app.use('/api/v1/insurance-establishments', insuranceEstablishmentRoutes);
 app.use('/api/v1/lab-numbers', labNumberRoutes);
 

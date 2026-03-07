@@ -22,6 +22,7 @@ const ConsultationDossier = require('./ConsultationDossier');
 const Bed = require('./Bed');
 const CustomItem = require('./CustomItem');
 const ConsultationPrice = require('./ConsultationPrice');
+const ConsultationType = require('./ConsultationType');
 const InsuranceEstablishment = require('./InsuranceEstablishment');
 const LabNumber = require('./LabNumber');
 
@@ -49,6 +50,7 @@ const models = {
   Bed,
   CustomItem,
   ConsultationPrice,
+  ConsultationType,
   LabNumber,
   sequelize
 };
@@ -184,6 +186,10 @@ CustomItem.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
 // ========== RELATIONS CONSULTATION PRICE ==========
 ConsultationPrice.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
 ConsultationPrice.belongsTo(User, { foreignKey: 'updatedBy', as: 'updater' });
+
+// ========== RELATIONS CONSULTATION TYPE ==========
+ConsultationType.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
+ConsultationType.belongsTo(User, { foreignKey: 'updatedBy', as: 'updater' });
 
 // ========== RELATIONS INSURANCE ESTABLISHMENT ==========
 InsuranceEstablishment.hasMany(Patient, { foreignKey: 'insuranceEstablishmentId', as: 'patients' });
