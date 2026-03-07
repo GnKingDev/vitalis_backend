@@ -79,18 +79,17 @@ exports.getProductById = async (req, res, next) => {
  */
 exports.createProduct = async (req, res, next) => {
   try {
-    const { name, category, price, salePrice, privatePrice, stock, minStock, unit, expiryDate } = req.body;
+    const { name, category, price, salePrice, stock, minStock, unit, expiryDate } = req.body;
     
-    if (!name || !category || price === undefined || stock === undefined || minStock === undefined || !unit) {
+    if (!name || !category || price === undefined || salePrice === undefined || stock === undefined || minStock === undefined || !unit) {
       return res.status(400).json(
-        errorResponse('name, category, price, stock, minStock et unit sont requis', 400)
+        errorResponse('name, category, price, salePrice, stock, minStock et unit sont requis', 400)
       );
     }
     
-    if (price < 0 || stock < 0 || minStock < 0 ||
-        (salePrice != null && salePrice < 0) || (privatePrice != null && privatePrice < 0)) {
+    if (price < 0 || salePrice < 0 || stock < 0 || minStock < 0) {
       return res.status(400).json(
-        errorResponse('price, stock, minStock, salePrice et privatePrice doivent être positifs', 400)
+        errorResponse('price, salePrice, stock et minStock doivent être positifs', 400)
       );
     }
     
@@ -98,8 +97,7 @@ exports.createProduct = async (req, res, next) => {
       name,
       category,
       price,
-      salePrice: salePrice != null ? salePrice : null,
-      privatePrice: privatePrice != null ? privatePrice : null,
+      salePrice,
       stock,
       minStock,
       unit,
@@ -112,7 +110,6 @@ exports.createProduct = async (req, res, next) => {
       category: product.category,
       price: product.price,
       salePrice: product.salePrice,
-      privatePrice: product.privatePrice,
       stock: product.stock,
       minStock: product.minStock,
       unit: product.unit,
@@ -136,14 +133,13 @@ exports.updateProduct = async (req, res, next) => {
       );
     }
     
-    const { name, category, price, salePrice, privatePrice, stock, minStock, unit, expiryDate, isActive } = req.body;
+    const { name, category, price, salePrice, stock, minStock, unit, expiryDate, isActive } = req.body;
     
     await product.update({
       name: name || product.name,
       category: category || product.category,
       price: price !== undefined ? price : product.price,
       salePrice: salePrice !== undefined ? salePrice : product.salePrice,
-      privatePrice: privatePrice !== undefined ? privatePrice : product.privatePrice,
       stock: stock !== undefined ? stock : product.stock,
       minStock: minStock !== undefined ? minStock : product.minStock,
       unit: unit || product.unit,

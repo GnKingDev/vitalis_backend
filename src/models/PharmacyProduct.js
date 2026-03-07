@@ -30,14 +30,7 @@ const PharmacyProduct = sequelize.define('PharmacyProduct', {
   },
   salePrice: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: true,
-    validate: {
-      min: 0
-    }
-  },
-  privatePrice: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: true,
+    allowNull: false,
     validate: {
       min: 0
     }
