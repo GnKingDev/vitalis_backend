@@ -834,6 +834,12 @@ exports.exportPayments = async (req, res, next) => {
     });
     const consultationPriceRow = await ConsultationPrice.findOne({ where: { isActive: true } });
     const consultationBasePrice = consultationPriceRow ? Number(consultationPriceRow.price) : 0;
+    const allConsultationTypeIds = [...new Set(rows.filter(p => p.type === 'consultation' && p.consultationTypeIds && Array.isArray(p.consultationTypeIds)).flatMap(p => p.consultationTypeIds))];
+    let consultationTypesMapExport = {};
+    if (allConsultationTypeIds.length > 0) {
+      const typesExport = await ConsultationType.findAll({ where: { id: allConsultationTypeIds }, attributes: ['id', 'name'] });
+      typesExport.forEach(t => { consultationTypesMapExport[t.id] = t.name; });
+    }
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Paiements');
     sheet.columns = [
@@ -842,6 +848,7 @@ exports.exportPayments = async (req, res, next) => {
       { header: 'Patient', key: 'patientName', width: 30 },
       { header: 'N° identifiant assureur', key: 'insuranceMemberNumber', width: 22 },
       { header: 'Type', key: 'type', width: 14 },
+      { header: 'Types de consultation', key: 'consultationTypesLabel', width: 35 },
       { header: 'Montant de base', key: 'amountBase', width: 14 },
       { header: 'Montant payé par le patient', key: 'amount', width: 18 },
       { header: 'Montant pris en charge par l\'assureur', key: 'insuranceDeduction', width: 28 },
@@ -872,12 +879,16 @@ exports.exportPayments = async (req, res, next) => {
       } else if (p.amountBase != null && p.amountBase > 0) {
         baseAmount = p.amountBase;
       }
+      const consultationTypesLabel = p.type === 'consultation' && p.consultationTypeIds && Array.isArray(p.consultationTypeIds) && p.consultationTypeIds.length > 0
+        ? p.consultationTypeIds.map(id => consultationTypesMapExport[id]).filter(Boolean).join(', ')
+        : '';
       sheet.addRow({
         createdAt: p.createdAt,
         vitalisId: patient?.vitalisId ?? '',
         patientName: patient ? `${patient.firstName} ${patient.lastName}` : '',
         insuranceMemberNumber,
         type: typeLibelle[p.type] || p.type,
+        consultationTypesLabel,
         amountBase: baseAmount,
         amount: p.amount,
         insuranceDeduction: p.insuranceDeduction != null ? Number(p.insuranceDeduction) : 0,
