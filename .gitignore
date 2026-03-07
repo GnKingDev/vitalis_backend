@@ -49,3 +49,4 @@ temp/
 # Docker
 docker/mysql/data/
 *.sql.backup
+chrome/
