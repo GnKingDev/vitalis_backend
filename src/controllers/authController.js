@@ -496,6 +496,38 @@ exports.activateUser = async (req, res, next) => {
 };
 
 /**
+ * Réinitialiser le mot de passe d'un utilisateur (admin uniquement)
+ * Génère un nouveau mot de passe aléatoire ou utilise celui fourni
+ */
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json(
+        errorResponse('Utilisateur non trouvé', 404)
+      );
+    }
+    
+    const { newPassword } = req.body;
+    const plainPassword = newPassword && newPassword.length >= 8
+      ? newPassword
+      : generateRandomPassword(12);
+    
+    await user.update({ password: plainPassword });
+    
+    res.json(successResponse({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      password: plainPassword
+    }, 'Mot de passe réinitialisé avec succès. Communiquez le nouveau mot de passe à l\'utilisateur.'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Supprimer un utilisateur
  */
 exports.deleteUser = async (req, res, next) => {

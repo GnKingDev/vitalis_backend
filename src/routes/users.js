@@ -17,6 +17,7 @@ router.post('/', authMiddleware, authorize(['admin']), validate(registerSchema),
 router.put('/:id', authMiddleware, authorize(['admin']), authController.updateUser);
 router.patch('/:id/suspend', authMiddleware, authorize(['admin']), authController.suspendUser);
 router.patch('/:id/activate', authMiddleware, authorize(['admin']), authController.activateUser);
+router.patch('/:id/reset-password', authMiddleware, authorize(['admin']), authController.resetPassword);
 router.delete('/:id', authMiddleware, authorize(['admin']), authController.deleteUser);
 
 module.exports = router; 
