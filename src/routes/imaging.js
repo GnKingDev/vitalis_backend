@@ -57,4 +57,10 @@ router.patch('/requests/:id/assign', authMiddleware, authorize(['admin', 'recept
  */
 router.patch('/requests/:id/complete', authMiddleware, authorize(['lab', 'admin']), imagingController.completeRequest);
 
+/**
+ * GET /api/v1/imaging/requests/:id/pdf
+ * Générer le PDF d'un résultat d'imagerie
+ */
+router.get('/requests/:id/pdf', authMiddleware, imagingController.getRequestPDF);
+
 module.exports = router;

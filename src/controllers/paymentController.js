@@ -1,5 +1,6 @@
-const { Payment, Patient, User, LabRequest, ImagingRequest, PaymentItem, PharmacyProduct } = require('../models');
+const { Payment, Patient, User, LabRequest, ImagingRequest, PaymentItem, PharmacyProduct, InsuranceEstablishment } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
+const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op, Sequelize } = require('sequelize');
 
 // ========== ROUTES PRINCIPALES ==========
@@ -57,8 +58,8 @@ exports.getAllPayments = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName'],
-          required: false
+          required: false,
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -72,7 +73,6 @@ exports.getAllPayments = async (req, res, next) => {
       distinct: true
     });
     
-    // Récupérer les ressources liées
     const payments = await Promise.all(
       rows.map(async (payment) => {
         let relatedResource = null;
@@ -101,7 +101,7 @@ exports.getAllPayments = async (req, res, next) => {
         
         return {
           id: payment.id,
-          patient: payment.patient,
+          patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
           amount: payment.amount,
           method: payment.method,
           status: payment.status,
@@ -202,7 +202,9 @@ exports.getPaymentById = async (req, res, next) => {
       include: [
         {
           model: Patient,
-          as: 'patient'
+          as: 'patient',
+          required: false,
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -245,7 +247,7 @@ exports.getPaymentById = async (req, res, next) => {
     
     res.json(successResponse({
       id: payment.id,
-      patient: payment.patient,
+      patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
       amount: payment.amount,
       method: payment.method,
       status: payment.status,
@@ -328,7 +330,8 @@ exports.createPayment = async (req, res, next) => {
       type,
       reference: reference || null,
       relatedId: relatedId || null,
-      createdBy: user.id
+      createdBy: user.id,
+      amountBase: amount
     });
     
     // Lier le paiement à la ressource si fournie

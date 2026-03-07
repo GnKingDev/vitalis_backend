@@ -50,6 +50,24 @@ const Payment = sequelize.define('Payment', {
       model: 'users',
       key: 'id'
     }
+  },
+  // Détail assurance / remise (optionnel, pour historique)
+  amountBase: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: 'Montant de base avant déductions'
+  },
+  insuranceDeduction: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    defaultValue: 0,
+    comment: 'Montant déduit par l\'assurance'
+  },
+  discountDeduction: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    defaultValue: 0,
+    comment: 'Montant déduit par la remise'
   }
 }, {
   tableName: 'payments',

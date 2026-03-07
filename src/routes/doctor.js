@@ -5,6 +5,14 @@ const { authorize } = require('../middleware/authorize');
 const { paginationMiddleware } = require('../middleware/pagination');
 const doctorController = require('../controllers/doctorController');
 
+// ========== ROUTE DISPONIBILITÉ ==========
+
+/**
+ * PATCH /api/v1/doctor/me/availability
+ * Modifier sa propre disponibilité (médecin uniquement)
+ */
+router.patch('/me/availability', authMiddleware, authorize(['doctor', 'admin']), doctorController.updateMyAvailability);
+
 // ========== ROUTES RÉSULTATS ==========
 
 /**
@@ -56,6 +64,12 @@ router.post('/custom-items', authMiddleware, authorize(['doctor', 'admin']), doc
 router.get('/custom-items', authMiddleware, authorize(['doctor', 'admin']), paginationMiddleware, doctorController.getAllCustomItems);
 
 /**
+ * GET /api/v1/doctor/custom-items/:id/pdf
+ * Générer le PDF d'un item personnalisé (résultat externe labo/imagerie)
+ */
+router.get('/custom-items/:id/pdf', authMiddleware, authorize(['doctor', 'admin']), doctorController.getCustomItemPDF);
+
+/**
  * PUT /api/v1/doctor/custom-items/:id
  * Mettre à jour un item personnalisé spécifique
  */
@@ -80,5 +94,17 @@ router.post('/prescriptions', authMiddleware, authorize(['doctor', 'admin']), do
  * Liste des ordonnances créées par un médecin
  */
 router.get('/prescriptions', authMiddleware, authorize(['doctor', 'admin']), paginationMiddleware, doctorController.getAllPrescriptions);
+
+/**
+ * GET /api/v1/doctor/prescriptions/:id/pdf
+ * Générer le PDF d'une ordonnance
+ */
+router.get('/prescriptions/:id/pdf', authMiddleware, authorize(['doctor', 'admin']), doctorController.getPrescriptionPDF);
+
+/**
+ * DELETE /api/v1/doctor/prescription-items/:id
+ * Supprimer un item d'ordonnance
+ */
+router.delete('/prescription-items/:id', authMiddleware, authorize(['doctor', 'admin']), doctorController.deletePrescriptionItem);
 
 module.exports = router;

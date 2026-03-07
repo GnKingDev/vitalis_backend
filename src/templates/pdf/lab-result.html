@@ -3,160 +3,240 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: Arial, sans-serif;
+      font-family: Arial, 'Helvetica Neue', sans-serif;
       font-size: 12px;
-      line-height: 1.6;
+      line-height: 1.5;
       color: #333;
       margin: 0;
       padding: 20px;
+      background: #fff;
     }
+    /* Header - Clinique VITALIS */
     .header {
-      text-align: center;
-      margin-bottom: 30px;
-      border-bottom: 3px solid #2c3e50;
-      padding-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0;
+      padding-bottom: 12px;
     }
-    .header h1 {
+    .logo-block {
+      flex-shrink: 0;
+    }
+    .logo-img {
+      height: 60px;
+      width: auto;
+      display: block;
+    }
+    .logo-block .clinique {
+      font-size: 14px;
+      color: #333;
       margin: 0;
-      font-size: 28px;
-      color: #2c3e50;
+    }
+    .logo-block .vitalis {
+      font-size: 24px;
       font-weight: bold;
+      color: #2563eb;
+      margin: 2px 0 0 0;
+      letter-spacing: 0.5px;
     }
-    .header h2 {
-      margin: 5px 0 0 0;
-      font-size: 16px;
-      color: #7f8c8d;
+    .gradient-line {
+      height: 4px;
+      background: linear-gradient(to right, #dc2626 0%, #2563eb 100%);
+      margin-top: 6px;
+      width: 120px;
+      border-radius: 2px;
     }
-    .patient-info {
-      margin-bottom: 20px;
-    }
-    .patient-info table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    .patient-info td {
-      padding: 8px;
-      border: 1px solid #ddd;
-    }
-    .patient-info td:first-child {
+    .header-title {
+      font-size: 18px;
       font-weight: bold;
-      background-color: #f8f9fa;
-      width: 40%;
+      color: #000;
+      text-align: right;
+      margin: 0;
     }
-    .section {
-      margin-bottom: 25px;
+    .header-separator {
+      height: 4px;
+      background: linear-gradient(to right, #dc2626 0%, #2563eb 100%);
+      margin: 16px 0 24px 0;
+      border-radius: 2px;
     }
+    /* Patient & exam info - style rapport */
+    .info-section {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .exam-info {
+      flex: 1;
+      min-width: 200px;
+    }
+    .exam-info p {
+      margin: 4px 0;
+      font-size: 12px;
+    }
+    .patient-box {
+      border: 1px solid #333;
+      padding: 12px 16px;
+      min-width: 220px;
+    }
+    .patient-box p {
+      margin: 4px 0;
+      font-size: 12px;
+    }
+    .patient-box strong {
+      display: inline-block;
+      min-width: 100px;
+    }
+    /* Section header - BIOCHIMIE, HEMATOLOGIE style */
     .section-title {
       font-weight: bold;
       font-size: 14px;
-      margin-bottom: 10px;
-      padding: 8px;
-      background-color: #3498db;
-      color: white;
-      border-radius: 4px;
+      padding: 8px 12px;
+      background: #e5e7eb;
+      color: #2563eb;
+      margin: 0 0 12px 0;
+      border: 1px solid #d1d5db;
     }
-    table {
+    /* Results table */
+    .results-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 15px;
+      margin-bottom: 24px;
+      font-size: 12px;
     }
-    table th, table td {
-      border: 1px solid #ddd;
-      padding: 8px;
+    .results-table th,
+    .results-table td {
+      border: 1px solid #333;
+      padding: 8px 10px;
       text-align: left;
+      vertical-align: top;
     }
-    table th {
-      background-color: #34495e;
-      color: white;
+    .results-table th {
       font-weight: bold;
+      background: #f9fafb;
     }
-    table tr:nth-child(even) {
-      background-color: #f8f9fa;
+    .results-table td:first-child {
+      width: 35%;
     }
-    .status-normal {
-      color: #27ae60;
-      font-weight: bold;
+    .results-table td:nth-child(2) {
+      width: 25%;
+      text-align: center;
     }
-    .status-high {
-      color: #e74c3c;
-      font-weight: bold;
+    .results-table td:nth-child(3) {
+      width: 20%;
     }
-    .status-low {
-      color: #f39c12;
-      font-weight: bold;
+    .results-table td:nth-child(4) {
+      width: 18%;
     }
+    .results-table td:nth-child(5) {
+      width: 12%;
+    }
+    .param-prefix { color: #555; }
+    .status-normal { color: #16a34a; font-weight: bold; }
+    .status-high { color: #dc2626; font-weight: bold; }
+    .status-low { color: #d97706; font-weight: bold; }
+    /* Notes */
     .notes {
       margin-top: 20px;
-      padding: 15px;
-      background-color: #ecf0f1;
-      border-left: 4px solid #3498db;
+      padding: 12px 16px;
+      background: #f3f4f6;
+      border-left: 4px solid #2563eb;
+      font-size: 12px;
+    }
+    .notes strong { display: block; margin-bottom: 4px; }
+    /* Signature et cachet */
+    .signature-section {
+      margin-top: 32px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .signature-block {
+      text-align: center;
+      min-width: 180px;
+    }
+    .signature-placeholder {
+      border: 1px dashed #999;
+      height: 60px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #999;
+    }
+    .signer-name {
+      font-size: 11px;
+      font-weight: bold;
+      margin: 0;
+    }
+    /* Footer */
+    .footer-separator {
+      height: 2px;
+      background: #2563eb;
+      margin: 32px 0 12px 0;
     }
     .footer {
-      margin-top: 40px;
-      text-align: center;
       font-size: 10px;
-      color: #7f8c8d;
-      border-top: 1px solid #ddd;
-      padding-top: 10px;
+      color: #6b7280;
+      line-height: 1.5;
     }
+    .footer p { margin: 2px 0; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>VITALIS</h1>
-    <h2>Centre Médical</h2>
-    <h3>RÉSULTATS DE LABORATOIRE</h3>
+    <div class="logo-block">
+      {{#if logoDataUri}}<img src="{{logoDataUri}}" alt="Clinique Vitalis" class="logo-img" />{{/if}}
+    </div>
+    <h1 class="header-title">CLINIQUE VITALIS</h1>
   </div>
+  <div class="header-separator"></div>
 
-  <div class="patient-info">
-    <table>
-      <tr>
-        <td>Nom du patient:</td>
-        <td>{{patientName}}</td>
-        <td>Âge:</td>
-        <td>{{patientAge}} ans</td>
-      </tr>
-      <tr>
-        <td>ID Patient:</td>
-        <td>{{vitalisId}}</td>
-        <td>N° Labo:</td>
-        <td>{{labRequestId}}</td>
-      </tr>
-      <tr>
-        <td>Date de service:</td>
-        <td>{{serviceDate}}</td>
-        <td>Demandé par:</td>
-        <td>{{doctorName}}</td>
-      </tr>
-    </table>
+  <div class="info-section">
+    <div class="exam-info">
+      <p><strong>Demandé par Dr :</strong> {{doctorName}}</p>
+      <p><strong>Examen du :</strong> {{serviceDate}}</p>
+      <p><strong>Document généré le :</strong> {{generatedDate}}</p>
+    </div>
+    <div class="patient-box">
+      <p><strong>Nom patient :</strong> {{patientName}}</p>
+      <p><strong>Code Patient :</strong> {{vitalisId}}</p>
+      <p><strong>Âge :</strong> {{patientAge}} ans</p>
+      <p><strong>N° Labo :</strong> {{labRequestId}}</p>
+      {{#if labNumber}}
+      <p><strong>N° Lab technicien :</strong> {{labNumber}}</p>
+      {{/if}}
+    </div>
   </div>
 
   {{#each sections}}
   <div class="section">
     <div class="section-title">{{title}}</div>
-    <table>
+    <table class="results-table">
       <thead>
         <tr>
-          <th>Analyse</th>
-          <th>Résultat</th>
+          <th>Paramètres</th>
+          <th>Résultats</th>
           <th>Unité</th>
-          <th>Référence</th>
+          <th>Valeurs usuelles</th>
           <th>Statut</th>
         </tr>
       </thead>
       <tbody>
         {{#each items}}
         <tr>
-          <td>{{name}}</td>
-          <td>{{value}}</td>
+          <td><span class="param-prefix">—</span> {{name}}</td>
+          <td style="text-align: center;">{{value}}</td>
           <td>{{unit}}</td>
           <td>{{reference}}</td>
           <td>
             {{#if status}}
               <span class="status-{{status}}">{{status}}</span>
             {{else}}
-              -
+              —
             {{/if}}
           </td>
         </tr>
@@ -168,21 +248,30 @@
 
   {{#if technicianNotes}}
   <div class="notes">
-    <strong>Notes du technicien:</strong>
+    <strong>Notes du technicien :</strong>
     <p>{{technicianNotes}}</p>
   </div>
   {{/if}}
 
   {{#if notes}}
   <div class="notes">
-    <strong>Commentaire envoyé au labo:</strong>
+    <strong>Commentaire envoyé au labo :</strong>
     <p>{{notes}}</p>
   </div>
   {{/if}}
 
+  <div class="signature-section">
+    <div class="signature-block">
+      <div class="signature-placeholder"></div>
+      <p class="signer-name">{{signerName}}</p>
+    </div>
+  </div>
+
+  <div class="footer-separator"></div>
   <div class="footer">
-    <p>Document généré le {{generatedDate}}</p>
-    <p>VITALIS - Centre Médical</p>
+    <p>CLINIQUE VITALIS - Laboratoires d'analyses médicales</p>
+    <p>Siège : NONGO C/LAMBAGNY, République de Guinée</p>
+    <p>Numéro : +224 622 26 93 83</p>
   </div>
 </body>
 </html>

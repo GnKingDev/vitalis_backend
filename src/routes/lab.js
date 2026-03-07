@@ -83,4 +83,10 @@ router.patch('/results/:id/validate', authMiddleware, authorize(['lab', 'admin']
  */
 router.patch('/results/:id/send', authMiddleware, authorize(['lab', 'admin']), labController.sendResult);
 
+/**
+ * GET /api/v1/lab/requests/:id/pdf
+ * Générer le PDF d'un résultat de laboratoire (id = labRequestId)
+ */
+router.get('/requests/:id/pdf', authMiddleware, labController.getRequestPDF);
+
 module.exports = router;

@@ -22,11 +22,14 @@ const ConsultationDossier = require('./ConsultationDossier');
 const Bed = require('./Bed');
 const CustomItem = require('./CustomItem');
 const ConsultationPrice = require('./ConsultationPrice');
+const InsuranceEstablishment = require('./InsuranceEstablishment');
+const LabNumber = require('./LabNumber');
 
 // Initialiser tous les modèles
 const models = {
   User,
   Patient,
+  InsuranceEstablishment,
   Consultation,
   Payment,
   LabRequest,
@@ -46,6 +49,7 @@ const models = {
   Bed,
   CustomItem,
   ConsultationPrice,
+  LabNumber,
   sequelize
 };
 
@@ -63,8 +67,10 @@ User.hasMany(DoctorAssignment, { foreignKey: 'createdBy', as: 'createdAssignment
 User.hasMany(ConsultationDossier, { foreignKey: 'doctorId', as: 'consultationDossiers' });
 User.hasMany(ConsultationDossier, { foreignKey: 'archivedBy', as: 'archivedDossiers' });
 User.hasMany(CustomItem, { foreignKey: 'doctorId', as: 'customItems' });
+User.hasOne(LabNumber, { foreignKey: 'userId', as: 'labNumber' });
 
 // ========== RELATIONS PATIENT ==========
+Patient.belongsTo(InsuranceEstablishment, { foreignKey: 'insuranceEstablishmentId', as: 'insuranceEstablishment' });
 Patient.hasMany(Consultation, { foreignKey: 'patientId', as: 'consultations' });
 Patient.hasMany(LabRequest, { foreignKey: 'patientId', as: 'labRequests' });
 Patient.hasMany(ImagingRequest, { foreignKey: 'patientId', as: 'imagingRequests' });
@@ -178,5 +184,11 @@ CustomItem.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
 // ========== RELATIONS CONSULTATION PRICE ==========
 ConsultationPrice.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
 ConsultationPrice.belongsTo(User, { foreignKey: 'updatedBy', as: 'updater' });
+
+// ========== RELATIONS INSURANCE ESTABLISHMENT ==========
+InsuranceEstablishment.hasMany(Patient, { foreignKey: 'insuranceEstablishmentId', as: 'patients' });
+
+// ========== RELATIONS LAB NUMBER ==========
+LabNumber.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 module.exports = models;

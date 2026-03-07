@@ -64,6 +64,41 @@ const Patient = sequelize.define('Patient', {
   emergencyContact: {
     type: DataTypes.STRING,
     allowNull: true
+  },
+  // Assurance
+  isInsured: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  insuranceEstablishmentId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    references: {
+      model: 'insurance_establishments',
+      key: 'id'
+    }
+  },
+  insuranceCoveragePercent: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    validate: { min: 0, max: 100 },
+    comment: 'Pourcentage de couverture (0-100)'
+  },
+  insuranceMemberNumber: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Numéro d\'identifiant chez l\'assureur (contrat, matricule)'
+  },
+  // Remise
+  hasDiscount: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  discountPercent: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    validate: { min: 0, max: 100 },
+    comment: 'Pourcentage de remise (0-100)'
   }
 }, {
   tableName: 'patients',

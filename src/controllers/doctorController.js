@@ -1,7 +1,39 @@
-const { LabRequest, LabResult, ImagingRequest, ConsultationDossier, Patient, User, Consultation, Prescription, PrescriptionItem, CustomItem, LabRequestExam, LabExam, ImagingRequestExam, ImagingExam, DoctorAssignment, PharmacyProduct } = require('../models');
+const { LabRequest, LabResult, LabRequestExam, LabExam, ImagingRequest, ImagingRequestExam, ImagingExam, ConsultationDossier, Patient, User, Consultation, Prescription, PrescriptionItem, CustomItem, DoctorAssignment, PharmacyProduct, InsuranceEstablishment } = require('../models');
 const { Op, Sequelize } = require('sequelize');
+const sequelize = require('../models/sequelize');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { calculateAge } = require('../utils/ageCalculator');
+const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
+
+// ========== ROUTE DISPONIBILITÉ ==========
+
+/**
+ * Modifier sa propre disponibilité (médecin uniquement)
+ */
+exports.updateMyAvailability = async (req, res, next) => {
+  try {
+    const user = req.user;
+    const { available } = req.body;
+
+    const doctor = await User.findByPk(user.id);
+    if (!doctor || doctor.role !== 'doctor') {
+      return res.status(403).json(
+        errorResponse('Accès réservé aux médecins', 403)
+      );
+    }
+
+    const newValue = available !== false;
+    await doctor.update({ doctorIsAvailable: newValue });
+
+    res.json(successResponse({
+      id: doctor.id,
+      name: doctor.name,
+      doctorIsAvailable: doctor.doctorIsAvailable
+    }, newValue ? 'Vous êtes marqué comme disponible' : 'Vous êtes marqué comme indisponible'));
+  } catch (error) {
+    next(error);
+  }
+};
 
 // ========== ROUTES RÉSULTATS COMBINÉS ==========
 
@@ -17,23 +49,28 @@ exports.getAllResults = async (req, res, next) => {
     const results = [];
     
     // Récupérer les résultats de laboratoire
-    // Uniquement ceux avec statut 'sent_to_doctor' ET qui ont un résultat avec statut 'sent' (en attente)
+    // Uniquement ceux avec statut 'sent_to_doctor', exclure les dossiers archivés
     if (!type || type === 'lab' || type === 'all') {
       const labWhere = {
-        doctorId: user.id,
-        status: 'sent_to_doctor'
+        status: 'sent_to_doctor',
+        [Op.and]: [
+          sequelize.literal(`(\`LabRequest\`.\`consultationId\` IS NULL OR \`LabRequest\`.\`consultationId\` NOT IN (SELECT \`consultationId\` FROM \`consultation_dossiers\` WHERE \`status\` = 'archived' AND \`consultationId\` IS NOT NULL))`)
+        ]
       };
-      
+      if (user.role === 'doctor') {
+        labWhere.doctorId = user.id;
+      }
       if (patientId) {
         labWhere.patientId = patientId;
       }
-      
       if (search) {
-        labWhere[Op.or] = [
-          { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
-          { '$patient.firstName$': { [Op.like]: `%${search}%` } },
-          { '$patient.lastName$': { [Op.like]: `%${search}%` } }
-        ];
+        labWhere[Op.and].push({
+          [Op.or]: [
+            { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
+            { '$patient.firstName$': { [Op.like]: `%${search}%` } },
+            { '$patient.lastName$': { [Op.like]: `%${search}%` } }
+          ]
+        });
       }
       
       const labRequests = await LabRequest.findAll({
@@ -42,17 +79,19 @@ exports.getAllResults = async (req, res, next) => {
           {
             model: Patient,
             as: 'patient',
-            attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
           },
           {
             model: LabResult,
             as: 'results',
-            where: {
-              status: 'sent' // Uniquement les résultats envoyés au médecin (en attente)
-            },
-            required: true, // Obligatoire : doit avoir un résultat avec statut 'sent'
+            required: false, // Inclure même sans LabResult (LabRequest sent_to_doctor suffit)
             limit: 1,
             order: [['createdAt', 'DESC']]
+          },
+          {
+            model: LabRequestExam,
+            as: 'exams',
+            include: [{ model: LabExam, as: 'labExam', attributes: ['id', 'name', 'category'] }]
           }
         ],
         order: [['updatedAt', 'DESC']]
@@ -60,47 +99,59 @@ exports.getAllResults = async (req, res, next) => {
       
       labRequests.forEach(request => {
         const result = request.results && request.results.length > 0 ? request.results[0] : null;
-        if (result) { // S'assurer qu'il y a un résultat
-          results.push({
+        results.push({
+          id: request.id,
+          type: 'lab',
+          patient: request.patient ? enrichPatientForDisplay(request.patient) : null,
+          receptionDate: request.createdAt,
+          exams: (request.exams || []).map(e => ({
+            id: e.labExam?.id,
+            name: e.labExam?.name,
+            category: e.labExam?.category,
+            amount: e.price
+          })),
+          request: {
             id: request.id,
-            type: 'lab',
-            patient: request.patient,
-            request: {
-              id: request.id,
-              status: request.status,
-              totalAmount: request.totalAmount
-            },
-            result: {
-              id: result.id,
-              status: result.status,
-              completedAt: result.completedAt
-            },
             status: request.status,
+            totalAmount: request.totalAmount
+          },
+          result: result ? {
+            id: result.id,
+            status: result.status,
             completedAt: result.completedAt
-          });
-        }
+          } : null,
+          status: request.status,
+          completedAt: result ? result.completedAt : request.updatedAt
+        });
       });
     }
     
     // Récupérer les résultats d'imagerie
-    // Uniquement ceux avec statut 'sent_to_doctor' ET qui ont des résultats remplis (en attente)
+    // Uniquement ceux avec statut 'sent_to_doctor' ET qui ont des résultats remplis, exclure les dossiers archivés
     if (!type || type === 'imaging' || type === 'all') {
       const imagingWhere = {
-        doctorId: user.id,
         status: 'sent_to_doctor',
-        results: { [Op.ne]: null } // Doit avoir des résultats remplis
+        results: { [Op.ne]: null },
+        [Op.and]: [
+          sequelize.literal(`(\`ImagingRequest\`.\`consultationId\` IS NULL OR \`ImagingRequest\`.\`consultationId\` NOT IN (SELECT \`consultationId\` FROM \`consultation_dossiers\` WHERE \`status\` = 'archived' AND \`consultationId\` IS NOT NULL))`)
+        ]
       };
+      if (user.role === 'doctor') {
+        imagingWhere.doctorId = user.id;
+      }
       
       if (patientId) {
         imagingWhere.patientId = patientId;
       }
       
       if (search) {
-        imagingWhere[Op.or] = [
-          { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
-          { '$patient.firstName$': { [Op.like]: `%${search}%` } },
-          { '$patient.lastName$': { [Op.like]: `%${search}%` } }
-        ];
+        imagingWhere[Op.and].push({
+          [Op.or]: [
+            { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
+            { '$patient.firstName$': { [Op.like]: `%${search}%` } },
+            { '$patient.lastName$': { [Op.like]: `%${search}%` } }
+          ]
+        });
       }
       
       const imagingRequests = await ImagingRequest.findAll({
@@ -109,7 +160,12 @@ exports.getAllResults = async (req, res, next) => {
           {
             model: Patient,
             as: 'patient',
-            attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
+          },
+          {
+            model: ImagingRequestExam,
+            as: 'exams',
+            include: [{ model: ImagingExam, as: 'imagingExam', attributes: ['id', 'name', 'category'] }]
           }
         ],
         order: [['updatedAt', 'DESC']]
@@ -121,7 +177,14 @@ exports.getAllResults = async (req, res, next) => {
           results.push({
             id: request.id,
             type: 'imaging',
-            patient: request.patient,
+            patient: request.patient ? enrichPatientForDisplay(request.patient) : null,
+            receptionDate: request.createdAt,
+            exams: (request.exams || []).map(e => ({
+              id: e.imagingExam?.id,
+              name: e.imagingExam?.name,
+              category: e.imagingExam?.category,
+              amount: e.price
+            })),
             request: {
               id: request.id,
               status: request.status,
@@ -159,16 +222,16 @@ exports.getResultById = async (req, res, next) => {
     const resultId = req.params.id;
     
     // Auto-détection du type si non fourni : essayer lab puis imaging
+    // Admin voit tous les résultats ; médecin : uniquement les siens
+    const doctorFilter = user.role === 'admin' ? {} : { doctorId: user.id };
     if (!type || (type !== 'lab' && type !== 'imaging')) {
-      const labRequest = await LabRequest.findOne({
-        where: { id: resultId, doctorId: user.id, status: 'sent_to_doctor' }
-      });
+      const labWhere = { id: resultId, status: 'sent_to_doctor', ...doctorFilter };
+      const labRequest = await LabRequest.findOne({ where: labWhere });
       if (labRequest) {
         type = 'lab';
       } else {
-        const imagingRequest = await ImagingRequest.findOne({
-          where: { id: resultId, doctorId: user.id, status: 'sent_to_doctor' }
-        });
+        const imagingWhere = { id: resultId, status: 'sent_to_doctor', ...doctorFilter };
+        const imagingRequest = await ImagingRequest.findOne({ where: imagingWhere });
         if (imagingRequest) {
           type = 'imaging';
         }
@@ -186,7 +249,8 @@ exports.getResultById = async (req, res, next) => {
         include: [
           {
             model: Patient,
-            as: 'patient'
+            as: 'patient',
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
           },
           {
             model: User,
@@ -220,7 +284,7 @@ exports.getResultById = async (req, res, next) => {
         ]
       });
       
-      if (!labRequest || labRequest.doctorId !== user.id) {
+      if (!labRequest || (user.role !== 'admin' && labRequest.doctorId !== user.id)) {
         return res.status(404).json(
           errorResponse('Résultat non trouvé', 404)
         );
@@ -251,7 +315,7 @@ exports.getResultById = async (req, res, next) => {
 
       res.json(successResponse({
         type: 'lab',
-        patient: labRequest.patient,
+        patient: enrichPatientForDisplay(labRequest.patient),
         doctor: labRequest.doctor,
         request: {
           id: labRequest.id,
@@ -272,7 +336,8 @@ exports.getResultById = async (req, res, next) => {
         include: [
           {
             model: Patient,
-            as: 'patient'
+            as: 'patient',
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
           },
           {
             model: User,
@@ -295,7 +360,7 @@ exports.getResultById = async (req, res, next) => {
         ]
       });
       
-      if (!imagingRequest || imagingRequest.doctorId !== user.id) {
+      if (!imagingRequest || (user.role !== 'admin' && imagingRequest.doctorId !== user.id)) {
         return res.status(404).json(
           errorResponse('Résultat non trouvé', 404)
         );
@@ -309,7 +374,7 @@ exports.getResultById = async (req, res, next) => {
       
       res.json(successResponse({
         type: 'imaging',
-        patient: imagingRequest.patient,
+        patient: enrichPatientForDisplay(imagingRequest.patient),
         doctor: imagingRequest.doctor,
         request: {
           id: imagingRequest.id,
@@ -338,16 +403,40 @@ exports.getResultById = async (req, res, next) => {
  */
 exports.getAllDossiers = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, status, search } = req.query;
+    const { page = 1, limit = 10, status, search, date } = req.query;
     const offset = (page - 1) * limit;
     const user = req.user;
     
-    const where = {
-      doctorId: user.id
-    };
+    const where = {};
     
     if (status && status !== 'all') {
-      where.status = status;
+      if (status === 'archived') {
+        where.status = 'archived';
+      } else {
+        where.doctorId = user.id;
+        if (status === 'active') {
+          where.status = { [Op.in]: ['active', 'completed'] };
+        } else if (status === 'completed') {
+          where.status = 'completed';
+        } else if (status === 'assigned' || status === 'in_consultation') {
+          where.status = { [Op.in]: ['active', 'completed'] };
+          where['$assignment.status$'] = status;
+        } else {
+          where.status = status;
+        }
+      }
+    } else {
+      where.doctorId = user.id;
+      where.status = { [Op.in]: ['active', 'completed'] };
+    }
+    
+    if (date) {
+      try {
+        const [y, m, d] = date.split('-').map(Number);
+        const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+        const end = new Date(y, m - 1, d, 23, 59, 59, 999);
+        where.createdAt = { [Op.between]: [start, end] };
+      } catch (_) {}
     }
     
     if (search) {
@@ -364,7 +453,7 @@ exports.getAllDossiers = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName', 'phone', 'dateOfBirth', 'gender']
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: DoctorAssignment,
@@ -383,18 +472,36 @@ exports.getAllDossiers = async (req, res, next) => {
       distinct: true
     });
     
-    const dossiers = rows.map(dossier => ({
-      id: dossier.id,
-      patient: {
-        ...dossier.patient.toJSON(),
-        age: calculateAge(dossier.patient.dateOfBirth),
-        gender: dossier.patient.gender
-      },
-      assignment: dossier.assignment,
-      consultation: dossier.consultation,
-      status: dossier.status,
-      createdAt: dossier.createdAt
-    }));
+    const patientIds = [...new Set(rows.map(d => d.patientId))];
+    const archivedCountByPatient = {};
+    if (patientIds.length > 0) {
+      const archived = await ConsultationDossier.findAll({
+        where: { patientId: { [Op.in]: patientIds }, status: 'archived' },
+        attributes: ['patientId'],
+        raw: true
+      });
+      archived.forEach(d => {
+        archivedCountByPatient[d.patientId] = (archivedCountByPatient[d.patientId] || 0) + 1;
+      });
+    }
+
+    const dossiers = rows.map(dossier => {
+      const patientPayload = enrichPatientForDisplay(dossier.patient);
+      const hasArchivedDossier = (archivedCountByPatient[dossier.patientId] || 0) > 0;
+      return {
+        id: dossier.id,
+        patient: {
+          ...(patientPayload || {}),
+          age: dossier.patient ? calculateAge(dossier.patient.dateOfBirth) : null,
+          gender: dossier.patient?.gender
+        },
+        assignment: dossier.assignment,
+        consultation: dossier.consultation,
+        status: dossier.status,
+        hasArchivedDossier,
+        createdAt: dossier.createdAt
+      };
+    });
     
     res.json(paginatedResponse({ dossiers }, { page: parseInt(page), limit: parseInt(limit) }, count));
   } catch (error) {
@@ -412,7 +519,8 @@ exports.getDossierById = async (req, res, next) => {
       include: [
         {
           model: Patient,
-          as: 'patient'
+          as: 'patient',
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: DoctorAssignment,
@@ -431,7 +539,12 @@ exports.getDossierById = async (req, res, next) => {
       ]
     });
     
-    if (!dossier || dossier.doctorId !== user.id) {
+    const canAccess = dossier && (
+      dossier.doctorId === user.id ||
+      dossier.status === 'archived' ||
+      user.role === 'admin'
+    );
+    if (!canAccess) {
       return res.status(404).json(
         errorResponse('Dossier non trouvé', 404)
       );
@@ -502,7 +615,7 @@ exports.getDossierById = async (req, res, next) => {
     
     res.json(successResponse({
       id: dossier.id,
-      patient: dossier.patient,
+      patient: enrichPatientForDisplay(dossier.patient),
       assignment: dossier.assignment,
       consultation: dossier.consultation,
       labRequests,
@@ -927,6 +1040,48 @@ exports.deleteCustomItem = async (req, res, next) => {
   }
 };
 
+/**
+ * Générer le PDF d'un item personnalisé (résultat labo/imagerie externe)
+ * GET /api/v1/doctor/custom-items/:id/pdf
+ */
+exports.getCustomItemPDF = async (req, res, next) => {
+  const pdfService = require('../services/pdfService');
+  try {
+    const itemId = req.params.id;
+    const user = req.user;
+
+    const customItem = await CustomItem.findByPk(itemId, {
+      include: [
+        { model: Patient, as: 'patient', required: true },
+        { model: User, as: 'doctor', attributes: ['id', 'name'], required: true }
+      ]
+    });
+
+    if (!customItem) {
+      return res.status(404).json(
+        errorResponse('Item personnalisé introuvable', 404)
+      );
+    }
+
+    if (user.role !== 'admin' && customItem.doctorId !== user.id) {
+      return res.status(403).json(
+        errorResponse('Vous n\'avez pas accès à cet item', 403)
+      );
+    }
+
+    const patient = customItem.patient;
+    const doctor = customItem.doctor;
+
+    const pdf = await pdfService.generateCustomItemPDF(customItem, patient, doctor);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="resultat-externe-${itemId.substring(0, 8)}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ========== ROUTES ORDONNANCES ==========
 
 /**
@@ -953,9 +1108,14 @@ exports.createPrescription = async (req, res, next) => {
     
     // Valider chaque item
     for (const item of items) {
-      if (!item.medication || !item.dosage || !item.frequency || !item.duration || !item.quantity) {
+      const med = (item.medication || '').toString().trim();
+      const dos = (item.dosage || '').toString().trim();
+      const freq = (item.frequency || '').toString().trim();
+      const dur = (item.duration || '').toString().trim();
+      const qty = (item.quantity !== undefined && item.quantity !== null) ? String(item.quantity).trim() : '';
+      if (!med || !dos || !freq || !dur || !qty) {
         return res.status(400).json(
-          errorResponse('Chaque item doit contenir: medication, dosage, frequency, duration, quantity', 400)
+          errorResponse('Chaque item doit contenir: médicament, dosage, fréquence, durée et quantité', 400)
         );
       }
     }
@@ -996,17 +1156,20 @@ exports.createPrescription = async (req, res, next) => {
     
     // Créer les items de l'ordonnance
     await Promise.all(
-      items.map(item =>
-        PrescriptionItem.create({
+      items.map(item => {
+        const qty = (item.quantity !== undefined && item.quantity !== null)
+          ? String(item.quantity).trim()
+          : '1';
+        return PrescriptionItem.create({
           prescriptionId: prescription.id,
-          medication: item.medication.trim(),
-          dosage: item.dosage.trim(),
-          frequency: item.frequency.trim(),
-          duration: item.duration.trim(),
-          quantity: item.quantity.trim(),
-          instructions: item.instructions ? item.instructions.trim() : null
-        })
-      )
+          medication: (item.medication || '').toString().trim(),
+          dosage: (item.dosage || '').toString().trim(),
+          frequency: (item.frequency || '').toString().trim(),
+          duration: (item.duration || '').toString().trim(),
+          quantity: qty || '1',
+          instructions: item.instructions ? String(item.instructions).trim() : null
+        });
+      })
     );
     
     // Récupérer l'ordonnance avec les relations
@@ -1108,6 +1271,101 @@ exports.getAllPrescriptions = async (req, res, next) => {
     });
     
     res.json(paginatedResponse({ prescriptions: rows }, { page: pageNum, limit: limitNum }, count));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Générer le PDF d'une ordonnance
+ * GET /api/v1/doctor/prescriptions/:id/pdf
+ */
+exports.getPrescriptionPDF = async (req, res, next) => {
+  const pdfService = require('../services/pdfService');
+  try {
+    const prescriptionId = req.params.id;
+    const user = req.user;
+
+    const prescription = await Prescription.findByPk(prescriptionId, {
+      include: [
+        { model: Patient, as: 'patient', required: true },
+        { model: User, as: 'doctor', attributes: ['id', 'name'], required: true },
+        { model: PrescriptionItem, as: 'items' }
+      ]
+    });
+
+    if (!prescription) {
+      return res.status(404).json(
+        errorResponse('Ordonnance introuvable', 404)
+      );
+    }
+
+    if (user.role !== 'admin' && prescription.doctorId !== user.id) {
+      return res.status(403).json(
+        errorResponse('Vous n\'avez pas accès à cette ordonnance', 403)
+      );
+    }
+
+    const patient = prescription.patient;
+    const doctor = prescription.doctor;
+    const items = (prescription.items || []).map(item => ({
+      medication: item.medication,
+      dosage: item.dosage,
+      frequency: item.frequency,
+      duration: item.duration,
+      quantity: item.quantity,
+      instructions: item.instructions
+    }));
+
+    const pdf = await pdfService.generatePrescriptionPDF(
+      prescription,
+      patient,
+      doctor,
+      items
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="ordonnance-${prescriptionId}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Supprimer un item d'ordonnance
+ * DELETE /api/v1/doctor/prescription-items/:id
+ */
+exports.deletePrescriptionItem = async (req, res, next) => {
+  try {
+    const user = req.user;
+    const itemId = req.params.id;
+
+    const item = await PrescriptionItem.findByPk(itemId, {
+      include: [{ model: Prescription, as: 'prescription' }]
+    });
+
+    if (!item) {
+      return res.status(404).json(
+        errorResponse('Item d\'ordonnance introuvable', 404)
+      );
+    }
+
+    const prescription = item.prescription;
+    if (!prescription) {
+      return res.status(404).json(
+        errorResponse('Ordonnance introuvable', 404)
+      );
+    }
+
+    if (user.role !== 'admin' && prescription.doctorId !== user.id) {
+      return res.status(403).json(
+        errorResponse('Vous n\'avez pas accès à cet item', 403)
+      );
+    }
+
+    await item.destroy();
+    res.json(successResponse(null, 'Médicament supprimé'));
   } catch (error) {
     next(error);
   }

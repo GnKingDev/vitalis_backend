@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const { User } = require('../models');
+const { User, LabNumber } = require('../models');
 const { successResponse, errorResponse } = require('../utils/responseHelper');
 const { generateRandomPassword } = require('../utils/passwordGenerator');
 const { Op, Sequelize } = require('sequelize');
@@ -240,6 +240,7 @@ exports.getAllUsers = async (req, res, next) => {
       limit: parseInt(limit),
       offset: parseInt(offset),
       attributes: { exclude: ['password'] },
+      include: [{ model: LabNumber, as: 'labNumber', attributes: ['id', 'number'], required: false }],
       order: [['createdAt', 'DESC']]
     });
     
@@ -300,7 +301,8 @@ exports.getUserStats = async (req, res, next) => {
 exports.getUserById = async (req, res, next) => {
   try {
     const user = await User.findByPk(req.params.id, {
-      attributes: { exclude: ['password'] }
+      attributes: { exclude: ['password'] },
+      include: [{ model: LabNumber, as: 'labNumber', attributes: ['id', 'number'], required: false }]
     });
     
     if (!user) {
@@ -320,7 +322,7 @@ exports.getUserById = async (req, res, next) => {
  */
 exports.createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role, department } = req.body;
+    const { name, email, password, role, department, labNumberId } = req.body;
     
     // Vérifier l'unicité de l'email
     const existingUser = await User.findOne({
@@ -350,14 +352,28 @@ exports.createUser = async (req, res, next) => {
       department
     });
     
+    // Assigner un numéro lab si role=lab et labNumberId fourni
+    if (role === 'lab' && labNumberId) {
+      const labNumber = await LabNumber.findByPk(labNumberId);
+      if (labNumber && !labNumber.userId) {
+        await labNumber.update({ userId: user.id });
+      }
+    }
+    
+    const userWithLab = await User.findByPk(user.id, {
+      attributes: { exclude: ['password'] },
+      include: [{ model: LabNumber, as: 'labNumber', attributes: ['id', 'number'], required: false }]
+    });
+    
     res.status(201).json(successResponse({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      department: user.department,
+      id: userWithLab.id,
+      name: userWithLab.name,
+      email: userWithLab.email,
+      role: userWithLab.role,
+      department: userWithLab.department,
+      labNumber: userWithLab.labNumber,
       password: plainPassword, // Retourner le mot de passe en clair uniquement lors de la création
-      createdAt: user.createdAt
+      createdAt: userWithLab.createdAt
     }, 'Utilisateur créé avec succès. Le mot de passe doit être modifié à la première connexion.'));
   } catch (error) {
     next(error);
@@ -377,7 +393,16 @@ exports.updateUser = async (req, res, next) => {
       );
     }
     
-    const { name, email, role, department } = req.body;
+    const { name, email, role, department, labNumberId } = req.body;
+    
+    // Gérer l'assignation du numéro lab (rôle lab uniquement)
+    await LabNumber.update({ userId: null }, { where: { userId: user.id } });
+    if (role === 'lab' && labNumberId) {
+      const labNumber = await LabNumber.findByPk(labNumberId);
+      if (labNumber) {
+        await labNumber.update({ userId: user.id });
+      }
+    }
     
     // Vérifier l'unicité de l'email si modifié
     if (email && email !== user.email) {
@@ -402,13 +427,19 @@ exports.updateUser = async (req, res, next) => {
       department: department !== undefined ? department : user.department
     });
     
+    const userWithLab = await User.findByPk(user.id, {
+      attributes: { exclude: ['password'] },
+      include: [{ model: LabNumber, as: 'labNumber', attributes: ['id', 'number'], required: false }]
+    });
+    
     res.json(successResponse({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      department: user.department,
-      updatedAt: user.updatedAt
+      id: userWithLab.id,
+      name: userWithLab.name,
+      email: userWithLab.email,
+      role: userWithLab.role,
+      department: userWithLab.department,
+      labNumber: userWithLab.labNumber,
+      updatedAt: userWithLab.updatedAt
     }));
   } catch (error) {
     next(error);

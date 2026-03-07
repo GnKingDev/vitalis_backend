@@ -128,15 +128,9 @@ exports.getAllRequests = async (req, res, next) => {
     
     // Filtrage selon le rôle
     if (user.role === 'lab') {
-      // Lab: voir uniquement les demandes avec paymentId
+      // Lab: voir uniquement les demandes en cours (pending). Les "Fini et envoyé au médecin" (sent_to_doctor) ne doivent pas apparaître.
       where.paymentId = { [Op.ne]: null };
-      // Le lab peut voir les demandes 'pending' ou 'sent_to_doctor' selon le paramètre status
-      if (status && (status === 'pending' || status === 'sent_to_doctor')) {
-        where.status = status;
-      } else {
-        // Par défaut, montrer les demandes 'pending'
-        where.status = 'pending';
-      }
+      where.status = 'pending';
       // Le filtre date est ignoré pour le lab (voir toutes les demandes, peu importe la date)
     } else if (user.role === 'doctor') {
       // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
@@ -166,7 +160,8 @@ exports.getAllRequests = async (req, res, next) => {
         where.status = status;
       }
     } else {
-      // Reception et Admin: voir toutes les demandes avec filtres optionnels
+      // Reception et Admin: voir les demandes en cours (pending) par défaut.
+      // Les "Fini et envoyé au médecin" (sent_to_doctor) ne doivent pas apparaître dans la liste imagerie.
       if (patientId) {
         where.patientId = patientId;
       }
@@ -175,6 +170,8 @@ exports.getAllRequests = async (req, res, next) => {
       }
       if (status) {
         where.status = status;
+      } else {
+        where.status = 'pending';
       }
     }
     // Pour le rôle lab, ne jamais appliquer le filtre de date
@@ -477,7 +474,7 @@ exports.createRequest = async (req, res, next) => {
     
     const totalAmount = exams.reduce((sum, exam) => sum + parseFloat(exam.price), 0);
     
-    // Créer automatiquement un paiement pour cette demande
+    // Créer automatiquement un paiement pour cette demande (montant de base toujours stocké)
     const payment = await Payment.create({
       patientId,
       amount: totalAmount,
@@ -486,7 +483,8 @@ exports.createRequest = async (req, res, next) => {
       type: 'imaging',
       reference: `IMG-${Date.now()}`,
       relatedId: null, // Sera mis à jour après création de la demande
-      createdBy: doctorId // Le médecin qui crée la demande
+      createdBy: doctorId, // Le médecin qui crée la demande
+      amountBase: totalAmount
     });
     
     // Créer la demande avec le paymentId
@@ -649,6 +647,78 @@ exports.completeRequest = async (req, res, next) => {
       results: request.results,
       updatedAt: request.updatedAt
     }, 'Résultats envoyés au médecin'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Générer le PDF d'un résultat d'imagerie
+ */
+exports.getRequestPDF = async (req, res, next) => {
+  const pdfService = require('../services/pdfService');
+  try {
+    const imagingRequest = await ImagingRequest.findByPk(req.params.id, {
+      include: [
+        {
+          model: Patient,
+          as: 'patient'
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: { exclude: ['password'] }
+        },
+        {
+          model: User,
+          as: 'labTechnician',
+          attributes: ['id', 'name'],
+          include: [{ model: require('../models').LabNumber, as: 'labNumber', attributes: ['number'], required: false }],
+          required: false
+        },
+        {
+          model: ImagingRequestExam,
+          as: 'exams',
+          include: [{
+            model: ImagingExam,
+            as: 'imagingExam'
+          }]
+        }
+      ]
+    });
+
+    if (!imagingRequest) {
+      return res.status(404).json(
+        errorResponse('Demande d\'imagerie non trouvée', 404)
+      );
+    }
+
+    const patient = imagingRequest.patient;
+    const doctor = imagingRequest.doctor;
+
+    if (!patient || !doctor) {
+      return res.status(404).json(
+        errorResponse('Patient ou médecin introuvable', 404)
+      );
+    }
+
+    // Formater les exams pour le template (name, category)
+    const exams = (imagingRequest.exams || []).map(exam => ({
+      id: exam.imagingExam?.id,
+      name: exam.imagingExam?.name || '—',
+      category: exam.imagingExam?.category || '—'
+    }));
+
+    const requestForPdf = {
+      ...imagingRequest.toJSON(),
+      exams
+    };
+
+    const pdf = await pdfService.generateImagingResultPDF(requestForPdf, patient, doctor);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="resultat-imagerie-${imagingRequest.id}.pdf"`);
+    res.send(pdf);
   } catch (error) {
     next(error);
   }

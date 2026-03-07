@@ -64,6 +64,12 @@ router.get('/alerts/stats', authMiddleware, pharmacyController.getAlertsStats);
 router.get('/payments', authMiddleware, paginationMiddleware, pharmacyController.getAllPayments);
 
 /**
+ * GET /api/v1/pharmacy/payments/export
+ * Export Excel des paiements (mêmes filtres : date, status, search, isInsured, hasDiscount, insuranceEstablishmentId)
+ */
+router.get('/payments/export', authMiddleware, pharmacyController.exportPayments);
+
+/**
  * GET /api/v1/pharmacy/payments/:id
  * Récupérer les détails d'un paiement
  */

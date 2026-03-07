@@ -1,4 +1,4 @@
-const { Consultation, Patient, User, LabRequest, ImagingRequest, Prescription, ConsultationDossier } = require('../models');
+const { Consultation, Patient, User, LabRequest, ImagingRequest, Prescription, ConsultationDossier, DoctorAssignment } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { Op } = require('sequelize');
 
@@ -308,6 +308,14 @@ exports.archiveDossier = async (req, res, next) => {
       archivedAt: new Date(),
       archivedBy: user.id
     });
+
+    // Marquer l'assignation comme terminée pour permettre une nouvelle assignation
+    if (dossier.assignmentId) {
+      await DoctorAssignment.update(
+        { status: 'completed' },
+        { where: { id: dossier.assignmentId } }
+      );
+    }
     
     const archivedDossier = await ConsultationDossier.findByPk(dossierId, {
       include: [

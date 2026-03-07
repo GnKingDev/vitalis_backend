@@ -1,7 +1,10 @@
-const { PharmacyProduct, Payment, PaymentItem, Patient, User } = require('../models');
+const { PharmacyProduct, Payment, PaymentItem, Patient, User, InsuranceEstablishment } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { calculateStockStatus, checkExpiringSoon, generateStockAlert } = require('../utils/stockCalculator');
+const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
+const { computePaymentAmount, getPercentagesFromPatient } = require('../utils/paymentAmountHelper');
 const { Op, Sequelize } = require('sequelize');
+const ExcelJS = require('exceljs');
 
 // ========== ROUTES PRODUITS ==========
 
@@ -269,32 +272,47 @@ exports.getAlertsStats = async (req, res, next) => {
 /**
  * Liste tous les paiements de pharmacie
  */
+function buildPharmacyPaymentsWhere(query) {
+  const { date, status, search, isInsured, hasDiscount, insuranceEstablishmentId } = query || {};
+  const where = { type: 'pharmacy' };
+  if (isInsured === 'true') {
+    where['$patient.isInsured$'] = true;
+    if (insuranceEstablishmentId) where['$patient.insuranceEstablishmentId$'] = insuranceEstablishmentId;
+  } else if (isInsured === 'false') {
+    where['$patient.isInsured$'] = false;
+  }
+  if (hasDiscount === 'true') {
+    where['$patient.hasDiscount$'] = true;
+    where['$patient.discountPercent$'] = { [Op.gt]: 0 };
+  }
+  if (date) {
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    where.createdAt = { [Op.between]: [startDate, endDate] };
+  }
+  if (status && status !== 'all') {
+    where.status = status;
+  }
+  if (search) {
+    where[Op.or] = [
+      { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
+      { '$patient.firstName$': { [Op.like]: `%${search}%` } },
+      { '$patient.lastName$': { [Op.like]: `%${search}%` } }
+    ];
+  }
+  if (hasDiscount === 'false') {
+    return { [Op.and]: [where, { [Op.or]: [{ '$patient.hasDiscount$': false }, { '$patient.discountPercent$': null }, { '$patient.discountPercent$': 0 }] }] };
+  }
+  return where;
+}
+
 exports.getAllPayments = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, date, status, search } = req.query;
+    const { page = 1, limit = 10 } = req.query;
     const offset = (page - 1) * limit;
-    
-    const where = { type: 'pharmacy' };
-    
-    if (date) {
-      const startDate = new Date(date);
-      startDate.setHours(0, 0, 0, 0);
-      const endDate = new Date(date);
-      endDate.setHours(23, 59, 59, 999);
-      where.createdAt = { [Op.between]: [startDate, endDate] };
-    }
-    
-    if (status && status !== 'all') {
-      where.status = status;
-    }
-    
-    if (search) {
-      where[Op.or] = [
-        { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
-        { '$patient.firstName$': { [Op.like]: `%${search}%` } },
-        { '$patient.lastName$': { [Op.like]: `%${search}%` } }
-      ];
-    }
+    const where = buildPharmacyPaymentsWhere(req.query);
     
     const { count, rows } = await Payment.findAndCountAll({
       where,
@@ -302,8 +320,8 @@ exports.getAllPayments = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName'],
-          required: false
+          required: false,
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -328,7 +346,7 @@ exports.getAllPayments = async (req, res, next) => {
     
     const payments = rows.map(payment => ({
       id: payment.id,
-      patient: payment.patient,
+      patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
       patientId: payment.patientId,
       amount: payment.amount,
       method: payment.method,
@@ -362,7 +380,8 @@ exports.getPaymentById = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          required: false
+          required: false,
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -388,7 +407,7 @@ exports.getPaymentById = async (req, res, next) => {
     
     res.json(successResponse({
       id: payment.id,
-      patient: payment.patient,
+      patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
       amount: payment.amount,
       method: payment.method,
       status: payment.status,
@@ -409,13 +428,81 @@ exports.getPaymentById = async (req, res, next) => {
 };
 
 /**
+ * Export Excel des paiements pharmacie (mêmes filtres : date, status, search, isInsured, hasDiscount, insuranceEstablishmentId).
+ */
+exports.exportPayments = async (req, res, next) => {
+  try {
+    const where = buildPharmacyPaymentsWhere(req.query);
+    const rows = await Payment.findAll({
+      where,
+      include: [
+        { model: Patient, as: 'patient', required: false, include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }] },
+        { model: User, as: 'creator', attributes: ['id', 'name', 'email'] },
+        { model: PaymentItem, as: 'items', include: [{ model: PharmacyProduct, as: 'product', attributes: ['id', 'name', 'category'] }] }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Paiements Pharmacie');
+    sheet.columns = [
+      { header: 'Date', key: 'createdAt', width: 20 },
+      { header: 'Type', key: 'type', width: 14 },
+      { header: 'ID Vitalis', key: 'vitalisId', width: 15 },
+      { header: 'Patient', key: 'patientName', width: 30 },
+      { header: 'Montant de base', key: 'amountBase', width: 14 },
+      { header: 'Montant payé par le patient', key: 'amount', width: 22 },
+      { header: 'Montant pris en charge par l\'assureur', key: 'insuranceDeduction', width: 28 },
+      { header: 'Assurance %', key: 'insuranceCoveragePercent', width: 12 },
+      { header: 'Remise %', key: 'discountPercent', width: 10 },
+      { header: 'N° identifiant assureur', key: 'insuranceMemberNumber', width: 22 },
+      { header: 'Assurance', key: 'insurance', width: 25 },
+      { header: 'Méthode', key: 'method', width: 14 },
+      { header: 'Statut', key: 'status', width: 10 },
+      { header: 'Créé par', key: 'creatorName', width: 20 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    const statusLibelle = { paid: 'Payé', pending: 'En attente', cancelled: 'Annulé' };
+    rows.forEach(p => {
+      const patient = p.patient;
+      const baseFromItems = p.items?.length ? p.items.reduce((s, i) => s + Number(i.unitPrice || 0) * Number(i.quantity || 0), 0) : null;
+      const baseAmount = (p.amountBase != null && p.amountBase > 0) ? p.amountBase : (baseFromItems != null ? baseFromItems : p.amount);
+      sheet.addRow({
+        createdAt: p.createdAt,
+        type: 'Pharmacie',
+        vitalisId: patient?.vitalisId ?? '',
+        patientName: patient ? `${patient.firstName} ${patient.lastName}` : '',
+        amountBase: baseAmount,
+        amount: p.amount,
+        insuranceDeduction: p.insuranceDeduction != null ? Number(p.insuranceDeduction) : 0,
+        insuranceCoveragePercent: patient?.insuranceCoveragePercent ?? 0,
+        discountPercent: patient?.discountPercent ?? 0,
+        insuranceMemberNumber: patient?.insuranceMemberNumber ?? '',
+        insurance: patient?.insuranceEstablishment?.name || (patient?.isInsured ? 'Oui' : '') || 'Non',
+        method: p.method,
+        status: statusLibelle[p.status] || p.status,
+        creatorName: p.creator?.name ?? ''
+      });
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = `paiements_pharmacie_${req.query.date || 'all'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Créer un nouveau paiement de pharmacie
  */
 exports.createPayment = async (req, res, next) => {
   const transaction = await require('../models').sequelize.transaction();
   
   try {
-    const { patientId, items, method, reference } = req.body;
+    const { patientId, items, method, reference, insurance, discount } = req.body;
     const user = req.user;
     
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -434,6 +521,15 @@ exports.createPayment = async (req, res, next) => {
       return res.status(400).json(
         errorResponse('reference est requis pour orange_money', 400)
       );
+    }
+    
+    if (insurance?.isInsured === true) {
+      const memberNumber = (insurance?.memberNumber ?? insurance?.insuranceMemberNumber ?? '').toString().trim();
+      if (!memberNumber) {
+        return res.status(400).json(
+          errorResponse('Le numéro d\'identifiant assureur est obligatoire lorsque l\'assurance est activée', 400)
+        );
+      }
     }
     
     // Vérifier que tous les produits existent et ont assez de stock
@@ -468,15 +564,36 @@ exports.createPayment = async (req, res, next) => {
       totalAmount += parseFloat(product.price) * item.quantity;
     }
     
-    // Créer le paiement
+    // Montant de base = total ; appliquer assurance et remise (selon body ou profil patient)
+    const amountBase = totalAmount;
+    let amountToPay = totalAmount;
+    let insuranceDeduction = 0;
+    let discountDeduction = 0;
+    const overrides = {};
+    if (insurance?.isInsured && insurance?.coveragePercent != null) overrides.insurancePercent = insurance.coveragePercent;
+    else if (insurance?.isInsured === false) overrides.insurancePercent = 0;
+    if (discount?.hasDiscount && discount?.discountPercent != null) overrides.discountPercent = discount.discountPercent;
+    else if (discount?.hasDiscount === false) overrides.discountPercent = 0;
+    const patient = patientId ? await Patient.findByPk(patientId, { transaction }) : null;
+    const { insurancePercent, discountPercent } = patient
+      ? getPercentagesFromPatient(patient, overrides, true)
+      : { insurancePercent: overrides.insurancePercent ?? 0, discountPercent: overrides.discountPercent ?? 0 };
+    const computed = computePaymentAmount(totalAmount, { insurancePercent, discountPercent });
+    amountToPay = computed.finalAmount;
+    insuranceDeduction = computed.insuranceDeduction;
+    discountDeduction = computed.discountDeduction;
+    
     const payment = await Payment.create({
       patientId: patientId || null,
-      amount: totalAmount,
+      amount: amountToPay,
       method,
       status: 'paid',
       type: 'pharmacy',
       reference: reference || null,
-      createdBy: user.id
+      createdBy: user.id,
+      amountBase,
+      insuranceDeduction,
+      discountDeduction
     }, { transaction });
     
     // Créer les items et mettre à jour les stocks

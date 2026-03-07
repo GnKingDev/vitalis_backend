@@ -1,8 +1,11 @@
-const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User } = require('../models');
+const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
 const { calculateAge } = require('../utils/ageCalculator');
+const { computePaymentAmount, getPercentagesFromPatient } = require('../utils/paymentAmountHelper');
+const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op, Sequelize } = require('sequelize');
+const ExcelJS = require('exceljs');
 
 // ========== ROUTES PATIENTS ==========
 
@@ -42,6 +45,12 @@ exports.getAllPatients = async (req, res, next) => {
           required: false
         },
         {
+          model: InsuranceEstablishment,
+          as: 'insuranceEstablishment',
+          required: false,
+          attributes: ['id', 'name', 'code']
+        },
+        {
           model: Payment,
           as: 'payments',
           where: { type: 'consultation' },
@@ -66,16 +75,38 @@ exports.getAllPatients = async (req, res, next) => {
       ],
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['createdAt', 'DESC']],
+      order: [
+        [
+          Sequelize.literal(`(SELECT COUNT(*) FROM doctor_assignments da WHERE da.patientId = \`Patient\`.\`id\` AND da.status IN ('assigned','in_consultation'))`),
+          'ASC'
+        ],
+        ['createdAt', 'DESC']
+      ],
       distinct: true
     });
     
-    // Formater les résultats
     const patients = rows.map(patient => {
       const payment = patient.payments && patient.payments.length > 0 ? patient.payments[0] : null;
-      const assignment = patient.doctorAssignments && patient.doctorAssignments.length > 0 ? patient.doctorAssignments[0] : null;
-      
+      const rawAssignment = patient.doctorAssignments && patient.doctorAssignments.length > 0 ? patient.doctorAssignments[0] : null;
+      // Ne renvoyer que les assignations actives (assigned, in_consultation) — pas les completed (dossier archivé)
+      const assignment = rawAssignment && ['assigned', 'in_consultation'].includes(rawAssignment.status)
+        ? rawAssignment
+        : null;
+      const base = enrichPatientForDisplay(patient);
+      // Pour la liste : assurance/remise du paiement affiché (ce dossier), pas du profil patient
+      let paymentCoveragePercent = null;
+      let paymentDiscountPercent = null;
+      if (payment && payment.amountBase != null && Number(payment.amountBase) > 0) {
+        const baseAmount = Number(payment.amountBase);
+        if (payment.insuranceDeduction != null) {
+          paymentCoveragePercent = Math.round((Number(payment.insuranceDeduction) / baseAmount) * 100);
+        }
+        if (payment.discountDeduction != null) {
+          paymentDiscountPercent = Math.round((Number(payment.discountDeduction) / baseAmount) * 100);
+        }
+      }
       return {
+        ...base,
         id: patient.id,
         vitalisId: patient.vitalisId,
         firstName: patient.firstName,
@@ -93,7 +124,9 @@ exports.getAllPatients = async (req, res, next) => {
           id: payment.id,
           amount: payment.amount,
           status: payment.status,
-          method: payment.method
+          method: payment.method,
+          coveragePercent: paymentCoveragePercent,
+          discountPercent: paymentDiscountPercent
         } : null,
         assignment: assignment ? {
           id: assignment.id,
@@ -104,17 +137,16 @@ exports.getAllPatients = async (req, res, next) => {
       };
     });
     
-    // Calculer les statistiques
+    // Calculer les statistiques (withPayment = patients distincts avec paiement payé)
     const stats = {
       total: count,
-      withPayment: await Payment.count({
-        where: { type: 'consultation', status: 'paid' },
+      withPayment: await Patient.count({
+        where,
         include: [{
-          model: Patient,
-          as: 'patient',
-          where: date ? {
-            createdAt: where.createdAt
-          } : {}
+          model: Payment,
+          as: 'payments',
+          where: { type: 'consultation', status: 'paid' },
+          required: true
         }],
         distinct: true
       }),
@@ -162,6 +194,12 @@ exports.getPatientById = async (req, res, next) => {
           required: false
         },
         {
+          model: InsuranceEstablishment,
+          as: 'insuranceEstablishment',
+          required: false,
+          attributes: ['id', 'name', 'code']
+        },
+        {
           model: Payment,
           as: 'payments',
           where: { type: 'consultation' },
@@ -194,8 +232,10 @@ exports.getPatientById = async (req, res, next) => {
     
     const payment = patient.payments && patient.payments.length > 0 ? patient.payments[0] : null;
     const assignment = patient.doctorAssignments && patient.doctorAssignments.length > 0 ? patient.doctorAssignments[0] : null;
+    const base = enrichPatientForDisplay(patient);
     
     res.json(successResponse({
+      ...base,
       id: patient.id,
       vitalisId: patient.vitalisId,
       firstName: patient.firstName,
@@ -226,9 +266,16 @@ exports.getPatientById = async (req, res, next) => {
  */
 exports.registerPatient = async (req, res, next) => {
   try {
-    const { firstName, lastName, dateOfBirth, gender, phone, email, address, emergencyContact, payment, bedId, assignDoctor, doctorId } = req.body;
+    // Debug inscription : ce que le front envoie
+    console.log('========== INSCRIPTION PATIENT (register) ==========');
+    console.log('req.body (clés):', Object.keys(req.body || {}));
+    console.log('req.body.insurance:', JSON.stringify(req.body?.insurance, null, 2));
+    console.log('req.body.discount:', JSON.stringify(req.body?.discount, null, 2));
+    console.log('Content-Type:', req.get('Content-Type'));
+
+    const { firstName, lastName, dateOfBirth, gender, phone, email, address, emergencyContact, payment, bedId, assignDoctor, doctorId, insurance, discount } = req.body;
     const user = req.user;
-    
+
     // Validation
     if (!firstName || !lastName || !dateOfBirth || !gender || !phone || !payment) {
       return res.status(400).json(
@@ -245,6 +292,24 @@ exports.registerPatient = async (req, res, next) => {
     // Générer l'ID Vitalis
     const vitalisId = await generateVitalisId();
     
+    // Champs assurance / remise pour le patient
+    const isInsured = insurance?.isInsured === true;
+    const insuranceMemberNumberRaw = insurance?.memberNumber ?? insurance?.insuranceMemberNumber;
+    const insuranceMemberNumber = isInsured && insuranceMemberNumberRaw != null
+      ? String(insuranceMemberNumberRaw).trim() || null
+      : null;
+    if (isInsured && !insuranceMemberNumber) {
+      return res.status(400).json(
+        errorResponse('Le numéro d\'identifiant assureur est obligatoire lorsque l\'assurance est activée', 400)
+      );
+    }
+    const insuranceEstablishmentId = isInsured && insurance?.establishmentId ? insurance.establishmentId : null;
+    const insuranceCoveragePercent = isInsured && insurance?.coveragePercent != null ? insurance.coveragePercent : null;
+    const hasDiscount = discount?.hasDiscount === true;
+    const discountPercent = hasDiscount && discount?.discountPercent != null ? discount.discountPercent : null;
+
+    console.log('Assurance/remise extraits -> isInsured:', isInsured, 'establishmentId:', insuranceEstablishmentId, 'coveragePercent:', insuranceCoveragePercent, 'memberNumber:', insuranceMemberNumber, 'hasDiscount:', hasDiscount, 'discountPercent:', discountPercent);
+
     // Créer le patient
     const patient = await Patient.create({
       vitalisId,
@@ -255,18 +320,34 @@ exports.registerPatient = async (req, res, next) => {
       phone,
       email: email || null,
       address: address || null,
-      emergencyContact: emergencyContact || null
+      emergencyContact: emergencyContact || null,
+      isInsured: !!isInsured,
+      insuranceEstablishmentId,
+      insuranceCoveragePercent,
+      insuranceMemberNumber,
+      hasDiscount: !!hasDiscount,
+      discountPercent
     });
     
-    // Créer le paiement
+    // Montant de base consultation = prix depuis le modèle ConsultationPrice (table consultation_prices)
+    const consultationPrice = await ConsultationPrice.findOne({ where: { isActive: true } });
+    const baseAmount = consultationPrice ? Number(consultationPrice.price) : (Number(payment.amount) || 0);
+    const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
+      insurancePercent: insuranceCoveragePercent || 0,
+      discountPercent: discountPercent || 0
+    });
+    
     const paymentRecord = await Payment.create({
       patientId: patient.id,
-      amount: payment.amount,
+      amount: finalAmount,
       method: payment.method,
       status: 'paid',
       type: 'consultation',
       reference: payment.reference || null,
-      createdBy: user.id
+      createdBy: user.id,
+      amountBase: amountBase,
+      insuranceDeduction: insuranceDeduction,
+      discountDeduction: discountDeduction
     });
     
     let bed = null;
@@ -329,8 +410,13 @@ exports.registerPatient = async (req, res, next) => {
       });
     }
     
+    const createdWithEstablishment = await Patient.findByPk(patient.id, {
+      include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
+    });
+    const patientPayload = enrichPatientForDisplay(createdWithEstablishment);
     res.status(201).json(successResponse({
       patient: {
+        ...patientPayload,
         id: patient.id,
         vitalisId: patient.vitalisId,
         firstName: patient.firstName,
@@ -360,11 +446,12 @@ exports.registerPatient = async (req, res, next) => {
 };
 
 /**
- * Enregistrer un paiement pour un patient existant
+ * Enregistrer un paiement pour un patient existant.
+ * Applique assurance puis remise sur le montant de base (sauf pharmacie : remise seule).
  */
 exports.createPayment = async (req, res, next) => {
   try {
-    const { method, amount, type, reference, relatedId } = req.body;
+    const { method, amount, type, reference, relatedId, insurance, discount } = req.body;
     const user = req.user;
     const patientId = req.params.id;
     
@@ -380,22 +467,77 @@ exports.createPayment = async (req, res, next) => {
       );
     }
     
+    if (insurance?.isInsured === true) {
+      const memberNumber = (insurance?.memberNumber ?? insurance?.insuranceMemberNumber ?? '').toString().trim();
+      if (!memberNumber) {
+        return res.status(400).json(
+          errorResponse('Le numéro d\'identifiant assureur est obligatoire lorsque l\'assurance est activée', 400)
+        );
+      }
+    }
+    
     const patient = await Patient.findByPk(patientId);
     if (!patient) {
       return res.status(404).json(
         errorResponse('Patient non trouvé', 404)
       );
     }
+
+    // Mettre à jour les infos assurance/remise du patient uniquement si l'assurance est explicitement fournie
+    const patientUpdates = {};
+    if (insurance && typeof insurance.isInsured === 'boolean') {
+      if (insurance.isInsured === true) {
+        const memberNumber = (insurance.memberNumber ?? insurance.insuranceMemberNumber ?? '').toString().trim();
+        if (memberNumber) patientUpdates.insuranceMemberNumber = memberNumber;
+        if (insurance.establishmentId) patientUpdates.insuranceEstablishmentId = insurance.establishmentId;
+        if (insurance.coveragePercent != null) patientUpdates.insuranceCoveragePercent = insurance.coveragePercent;
+        patientUpdates.isInsured = true;
+      } else {
+        patientUpdates.isInsured = false;
+        patientUpdates.insuranceMemberNumber = null;
+        patientUpdates.insuranceEstablishmentId = null;
+        patientUpdates.insuranceCoveragePercent = null;
+      }
+    }
+    if (discount) {
+      if (discount.hasDiscount === true) {
+        if (discount.discountPercent != null) patientUpdates.discountPercent = discount.discountPercent;
+        patientUpdates.hasDiscount = true;
+      } else if (discount.hasDiscount === false) {
+        patientUpdates.hasDiscount = false;
+        patientUpdates.discountPercent = null;
+      }
+    }
+    if (Object.keys(patientUpdates).length > 0) {
+      await patient.update(patientUpdates);
+    }
+    
+    let baseAmount = Number(amount) || 0;
+    if (type === 'consultation') {
+      const consultationPrice = await ConsultationPrice.findOne({ where: { isActive: true } });
+      if (consultationPrice) baseAmount = Number(consultationPrice.price);
+    }
+    const overrides = {};
+    if (insurance?.coveragePercent != null) overrides.insurancePercent = insurance.coveragePercent;
+    if (discount?.discountPercent != null) overrides.discountPercent = discount.discountPercent;
+    const { insurancePercent, discountPercent } = getPercentagesFromPatient(patient, overrides, type !== 'pharmacy');
+    const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
+      insurancePercent,
+      discountPercent
+    });
     
     const payment = await Payment.create({
       patientId,
-      amount,
+      amount: finalAmount,
       method,
       status: 'paid',
       type,
       reference: reference || null,
       relatedId: relatedId || null,
-      createdBy: user.id
+      createdBy: user.id,
+      amountBase,
+      insuranceDeduction,
+      discountDeduction
     });
     
     // Si relatedId fourni, lier le paiement à la ressource
@@ -427,63 +569,11 @@ exports.createPayment = async (req, res, next) => {
 exports.getAllPayments = async (req, res, next) => {
   try {
     console.log('=== GET ALL PAYMENTS DEBUG ===');
-    const { page = 1, limit = 10, date, type, status, search, filterByDate } = req.query;
-    console.log('Query params:', { page, limit, date, type, status, search, filterByDate });
+    const { page = 1, limit = 10 } = req.query;
+    console.log('Query params:', { ...req.query, page, limit });
     
     const offset = (page - 1) * limit;
-    
-    const where = {};
-    
-    // Filtrer par date uniquement si demandé explicitement (filterByDate=1 ou true)
-    // Sinon on affiche tout (première requête = pas de filtre date)
-    const applyDateFilter = filterByDate === '1' || filterByDate === 'true';
-    if (applyDateFilter && date) {
-      try {
-        console.log('📅 Filtre par date:', date);
-        const dateParts = date.split('-');
-        if (dateParts.length === 3) {
-          const year = parseInt(dateParts[0]);
-          const month = parseInt(dateParts[1]) - 1;
-          const day = parseInt(dateParts[2]);
-          const startDate = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
-          const endDate = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-          if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-            where.createdAt = { [Op.between]: [startDate, endDate] };
-            console.log('  ✅ Filtre de date appliqué');
-          }
-        }
-      } catch (error) {
-        console.warn('❌ Erreur lors du parsing de la date, filtre ignoré:', date, error);
-      }
-    } else if (date && !applyDateFilter) {
-      console.log('📅 Date fournie mais filtre non appliqué (première requête = tout afficher)');
-    }
-    
-    // Filtrer par type si spécifié
-    if (type && type !== 'all') {
-      where.type = type;
-      console.log('🔍 Filtre par type:', type);
-    } else {
-      // Exclure les paiements de type "pharmacy" par défaut
-      where.type = { [Op.ne]: 'pharmacy' };
-      console.log('🔍 Exclusion des paiements pharmacy (types inclus: lab, imaging, consultation)');
-    }
-    
-    if (status && status !== 'all') {
-      where.status = status;
-      console.log('🔍 Filtre par statut:', status);
-    }
-    
-    if (search) {
-      where[Op.or] = [
-        { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
-        { '$patient.firstName$': { [Op.like]: `%${search}%` } },
-        { '$patient.lastName$': { [Op.like]: `%${search}%` } },
-        { reference: { [Op.like]: `%${search}%` } }
-      ];
-      console.log('🔍 Recherche:', search);
-    }
-    
+    const where = buildReceptionPaymentsWhere(req.query);
     console.log('📋 Where clause:', JSON.stringify(where, null, 2));
     
     const { count, rows } = await Payment.findAndCountAll({
@@ -492,15 +582,17 @@ exports.getAllPayments = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName'],
-          required: false // Permettre les paiements sans patient (si nécessaire)
+          required: false,
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
           as: 'creator',
           attributes: ['id', 'name', 'email'],
           required: false
-        }
+        },
+        { model: LabRequest, as: 'labRequest', required: false, attributes: ['id', 'totalAmount'] },
+        { model: ImagingRequest, as: 'imagingRequest', required: false, attributes: ['id', 'totalAmount'] }
       ],
       limit: parseInt(limit),
       offset: parseInt(offset),
@@ -548,29 +640,50 @@ exports.getAllPayments = async (req, res, next) => {
       });
     }
     
-    const payments = rows.map(payment => ({
-      id: payment.id,
-      patient: payment.patient,
-      amount: payment.amount,
-      method: payment.method,
-      status: payment.status,
-      type: payment.type,
-      reference: payment.reference,
-      createdBy: payment.creator,
-      createdAt: payment.createdAt
-    }));
+    const consultationPriceRow = await ConsultationPrice.findOne({ where: { isActive: true } });
+    const consultationBasePrice = consultationPriceRow ? Number(consultationPriceRow.price) : 0;
+
+    const payments = rows.map(payment => {
+      let amountBase = payment.amountBase != null && payment.amountBase > 0 ? Number(payment.amountBase) : null;
+      if (amountBase == null) {
+        if (payment.type === 'consultation') {
+          amountBase = consultationBasePrice;
+        } else if (payment.type === 'lab' && payment.labRequest?.totalAmount != null) {
+          amountBase = Number(payment.labRequest.totalAmount);
+        } else if (payment.type === 'imaging' && payment.imagingRequest?.totalAmount != null) {
+          amountBase = Number(payment.imagingRequest.totalAmount);
+        } else {
+          amountBase = payment.amount != null ? Number(payment.amount) : 0;
+        }
+      }
+      return {
+        id: payment.id,
+        patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
+        amount: payment.amount,
+        amountBase,
+        insuranceDeduction: payment.insuranceDeduction != null ? Number(payment.insuranceDeduction) : 0,
+        discountDeduction: payment.discountDeduction != null ? Number(payment.discountDeduction) : 0,
+        method: payment.method,
+        status: payment.status,
+        type: payment.type,
+        reference: payment.reference,
+        createdBy: payment.creator,
+        createdAt: payment.createdAt
+      };
+    });
     
-    // Statistiques
+    // Statistiques (inclure Patient pour que les filtres $patient.xxx$ soient valides)
+    const statsInclude = [{ model: Patient, as: 'patient', required: false, attributes: [] }];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     
     const [total, totalAmount, todayCount, todayAmount] = await Promise.all([
-      Payment.count({ where }),
-      Payment.sum('amount', { where }),
-      Payment.count({ where: { ...where, createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } } }),
-      Payment.sum('amount', { where: { ...where, createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } } })
+      Payment.count({ where, include: statsInclude, distinct: true }),
+      Payment.sum('amount', { where, include: statsInclude }),
+      Payment.count({ where: { ...where, createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } }, include: statsInclude, distinct: true }),
+      Payment.sum('amount', { where: { ...where, createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } }, include: statsInclude })
     ]);
     
     res.json({
@@ -597,6 +710,152 @@ exports.getAllPayments = async (req, res, next) => {
 };
 
 /**
+ * Construit le where pour la liste/export des paiements réception (date, type, status, search, isInsured, hasDiscount, insuranceEstablishmentId).
+ */
+function buildReceptionPaymentsWhere(query) {
+  const { date, dateFrom, dateTo, type, status, search, isInsured, hasDiscount, insuranceEstablishmentId } = query || {};
+  const where = {};
+  if (isInsured === 'true') {
+    where['$patient.isInsured$'] = true;
+    if (insuranceEstablishmentId) where['$patient.insuranceEstablishmentId$'] = insuranceEstablishmentId;
+  } else if (isInsured === 'false') {
+    where['$patient.isInsured$'] = false;
+  }
+  if (hasDiscount === 'true') {
+    where['$patient.hasDiscount$'] = true;
+    where['$patient.discountPercent$'] = { [Op.gt]: 0 };
+  }
+  if (dateFrom && dateTo) {
+    try {
+      const start = new Date(dateFrom);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        where.createdAt = { [Op.between]: [start, end] };
+      }
+    } catch (_) {}
+  } else if (date) {
+    try {
+      const dateParts = date.split('-');
+      if (dateParts.length === 3) {
+        const year = parseInt(dateParts[0]);
+        const month = parseInt(dateParts[1]) - 1;
+        const day = parseInt(dateParts[2]);
+        const startDate = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+        const endDate = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+        if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          where.createdAt = { [Op.between]: [startDate, endDate] };
+        }
+      }
+    } catch (_) {}
+  }
+  if (type && type !== 'all') {
+    where.type = type;
+  } else {
+    where.type = { [Op.ne]: 'pharmacy' };
+  }
+  if (status && status !== 'all') {
+    where.status = status;
+  }
+  if (search) {
+    where[Op.or] = [
+      { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
+      { '$patient.firstName$': { [Op.like]: `%${search}%` } },
+      { '$patient.lastName$': { [Op.like]: `%${search}%` } },
+      { reference: { [Op.like]: `%${search}%` } }
+    ];
+  }
+  if (hasDiscount === 'false') {
+    return { [Op.and]: [where, { [Op.or]: [{ '$patient.hasDiscount$': false }, { '$patient.discountPercent$': null }, { '$patient.discountPercent$': 0 }] }] };
+  }
+  return where;
+}
+
+/**
+ * Export Excel des paiements réception (mêmes filtres que la liste).
+ */
+exports.exportPayments = async (req, res, next) => {
+  try {
+    const where = buildReceptionPaymentsWhere(req.query);
+    const rows = await Payment.findAll({
+      where,
+      include: [
+        { model: Patient, as: 'patient', required: false, include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }] },
+        { model: User, as: 'creator', attributes: ['id', 'name', 'email'], required: false },
+        { model: LabRequest, as: 'labRequest', required: false, attributes: ['id', 'totalAmount'] },
+        { model: ImagingRequest, as: 'imagingRequest', required: false, attributes: ['id', 'totalAmount'] }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+    const consultationPriceRow = await ConsultationPrice.findOne({ where: { isActive: true } });
+    const consultationBasePrice = consultationPriceRow ? Number(consultationPriceRow.price) : 0;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Paiements');
+    sheet.columns = [
+      { header: 'Date', key: 'createdAt', width: 20 },
+      { header: 'ID Vitalis', key: 'vitalisId', width: 15 },
+      { header: 'Patient', key: 'patientName', width: 30 },
+      { header: 'N° identifiant assureur', key: 'insuranceMemberNumber', width: 22 },
+      { header: 'Type', key: 'type', width: 14 },
+      { header: 'Montant de base', key: 'amountBase', width: 14 },
+      { header: 'Montant payé par le patient', key: 'amount', width: 18 },
+      { header: 'Montant pris en charge par l\'assureur', key: 'insuranceDeduction', width: 28 },
+      { header: 'Assurance %', key: 'insuranceCoveragePercent', width: 12 },
+      { header: 'Remise %', key: 'discountPercent', width: 10 },
+      { header: 'Assurance', key: 'insurance', width: 25 },
+      { header: 'Méthode', key: 'method', width: 14 },
+      { header: 'Statut', key: 'status', width: 10 },
+      { header: 'Créé par', key: 'creatorName', width: 20 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    const typeLibelle = { consultation: 'Consultation', lab: 'Laboratoire', imaging: 'Imagerie', pharmacy: 'Pharmacie' };
+    const statusLibelle = { paid: 'Payé', pending: 'En attente', cancelled: 'Annulé' };
+    rows.forEach(p => {
+      const patient = p.patient;
+      const patientData = patient && typeof patient.get === 'function' ? patient.get({ plain: true }) : (patient || {});
+      const insuranceMemberNumber = (patientData?.insuranceMemberNumber ?? patientData?.insurance_member_number ?? patient?.insuranceMemberNumber ?? patient?.insurance_member_number ?? '').toString().trim() || '';
+      const establishmentName = patient?.insuranceEstablishment?.name || (patient?.isInsured ? 'Oui' : '') || 'Non';
+      let baseAmount = p.amount;
+      if (p.type === 'consultation') {
+        baseAmount = (p.amountBase != null && p.amountBase > 0) ? p.amountBase : consultationBasePrice;
+      } else if (p.type === 'lab') {
+        baseAmount = (p.amountBase != null && p.amountBase > 0) ? p.amountBase : (p.labRequest?.totalAmount != null ? Number(p.labRequest.totalAmount) : p.amount);
+      } else if (p.type === 'imaging') {
+        baseAmount = (p.amountBase != null && p.amountBase > 0) ? p.amountBase : (p.imagingRequest?.totalAmount != null ? Number(p.imagingRequest.totalAmount) : p.amount);
+      } else if (p.amountBase != null && p.amountBase > 0) {
+        baseAmount = p.amountBase;
+      }
+      sheet.addRow({
+        createdAt: p.createdAt,
+        vitalisId: patient?.vitalisId ?? '',
+        patientName: patient ? `${patient.firstName} ${patient.lastName}` : '',
+        insuranceMemberNumber,
+        type: typeLibelle[p.type] || p.type,
+        amountBase: baseAmount,
+        amount: p.amount,
+        insuranceDeduction: p.insuranceDeduction != null ? Number(p.insuranceDeduction) : 0,
+        insuranceCoveragePercent: patient?.insuranceCoveragePercent ?? patientData?.insuranceCoveragePercent ?? 0,
+        discountPercent: patient?.discountPercent ?? patientData?.discountPercent ?? 0,
+        insurance: establishmentName,
+        method: p.method,
+        status: statusLibelle[p.status] || p.status,
+        creatorName: p.creator?.name ?? ''
+      });
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = `paiements_${req.query.date || 'all'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Récupérer les détails d'un paiement
  */
 exports.getPaymentById = async (req, res, next) => {
@@ -605,7 +864,8 @@ exports.getPaymentById = async (req, res, next) => {
       include: [
         {
           model: Patient,
-          as: 'patient'
+          as: 'patient',
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -639,7 +899,7 @@ exports.getPaymentById = async (req, res, next) => {
     
     res.json(successResponse({
       id: payment.id,
-      patient: payment.patient,
+      patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
       amount: payment.amount,
       method: payment.method,
       status: payment.status,
@@ -659,45 +919,60 @@ exports.getPaymentById = async (req, res, next) => {
 /**
  * Liste des demandes de laboratoire et imagerie pour paiement
  */
+/**
+ * Construit le where pour lab/imaging requests (date, search, isInsured, hasDiscount, insuranceEstablishmentId).
+ */
+function buildLabPaymentsWhere(query) {
+  const { date, search, isInsured, hasDiscount, insuranceEstablishmentId } = query || {};
+  const where = {};
+  if (isInsured === 'true') {
+    where['$patient.isInsured$'] = true;
+    if (insuranceEstablishmentId) where['$patient.insuranceEstablishmentId$'] = insuranceEstablishmentId;
+  } else if (isInsured === 'false') {
+    where['$patient.isInsured$'] = false;
+  }
+  if (hasDiscount === 'true') {
+    where['$patient.hasDiscount$'] = true;
+    where['$patient.discountPercent$'] = { [Op.gt]: 0 };
+  }
+  if (date) {
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    where.createdAt = { [Op.between]: [startDate, endDate] };
+  }
+  if (search) {
+    where[Op.or] = [
+      { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
+      { '$patient.firstName$': { [Op.like]: `%${search}%` } },
+      { '$patient.lastName$': { [Op.like]: `%${search}%` } }
+    ];
+  }
+  if (hasDiscount === 'false') {
+    return { [Op.and]: [where, { [Op.or]: [{ '$patient.hasDiscount$': false }, { '$patient.discountPercent$': null }, { '$patient.discountPercent$': 0 }] }] };
+  }
+  return where;
+}
+
 exports.getLabPayments = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, date, status, search, type } = req.query;
-    const offset = (page - 1) * limit;
+    const limitNum = Math.min(parseInt(limit) || 10, 100);
+    const offset = (parseInt(page) - 1) * limitNum;
     
-    const where = {};
+    const where = buildLabPaymentsWhere(req.query);
     
-    if (date) {
-      const startDate = new Date(date);
-      startDate.setHours(0, 0, 0, 0);
-      const endDate = new Date(date);
-      endDate.setHours(23, 59, 59, 999);
-      where.createdAt = { [Op.between]: [startDate, endDate] };
-    }
-    
-    // Filtrer par statut du paiement
-    // Note: On ne peut pas filtrer directement sur payment.status dans le where de LabRequest
-    // On va le faire après avec un filtre sur les résultats ou via une jointure
-    // Pour l'instant, on garde la logique basique mais on va améliorer avec l'inclusion du Payment
-    
-    if (search) {
-      where[Op.or] = [
-        { '$patient.vitalisId$': { [Op.like]: `%${search}%` } },
-        { '$patient.firstName$': { [Op.like]: `%${search}%` } },
-        { '$patient.lastName$': { [Op.like]: `%${search}%` } }
-      ];
-    }
-    
-    const requests = [];
-    let totalCount = 0;
+    const allRequests = [];
     
     if (!type || type === 'lab' || type === 'all') {
-      const { count, rows } = await LabRequest.findAndCountAll({
+      const { rows } = await LabRequest.findAndCountAll({
         where,
         include: [
           {
             model: Patient,
             as: 'patient',
-            attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
           },
           {
             model: User,
@@ -707,7 +982,7 @@ exports.getLabPayments = async (req, res, next) => {
           {
             model: Payment,
             as: 'payment',
-            attributes: ['id', 'status', 'method', 'amount'],
+            attributes: ['id', 'status', 'method', 'amount', 'amountBase', 'insuranceDeduction', 'discountDeduction'],
             required: false
           },
           {
@@ -717,13 +992,11 @@ exports.getLabPayments = async (req, res, next) => {
             required: false
           }
         ],
-        limit: parseInt(limit),
-        offset: parseInt(offset),
+        limit: 1000,
         order: [['createdAt', 'DESC']],
         distinct: true
       });
       
-      // Filtrer par statut du paiement si spécifié
       let filteredRows = rows;
       if (status === 'pending') {
         filteredRows = rows.filter(row => !row.payment || row.payment.status === 'pending');
@@ -731,38 +1004,42 @@ exports.getLabPayments = async (req, res, next) => {
         filteredRows = rows.filter(row => row.payment && row.payment.status === 'paid');
       }
       
-      totalCount += filteredRows.length;
       filteredRows.forEach(row => {
-        // Utiliser le statut du paiement comme statut principal
         const paymentStatus = row.payment ? row.payment.status : 'pending';
-        requests.push({
+        const p = row.payment;
+        allRequests.push({
           id: row.id,
           type: 'lab',
-          patient: row.patient,
+          patient: row.patient ? enrichPatientForDisplay(row.patient) : null,
           doctor: row.doctor,
           labTechnician: row.labTechnician ? {
             id: row.labTechnician.id,
             name: row.labTechnician.name,
             email: row.labTechnician.email
           } : null,
-          status: paymentStatus, // Utiliser le statut du paiement au lieu du statut de la demande
+          status: paymentStatus,
           totalAmount: row.totalAmount,
           paymentId: row.paymentId,
           paymentStatus: paymentStatus,
-          requestStatus: row.status, // Garder le statut de la demande séparément si nécessaire
-          createdAt: row.createdAt
+          requestStatus: row.status,
+          createdAt: row.createdAt,
+          // Montant de base, déductions et montant payé (après déductions)
+          amountBase: p?.amountBase ?? row.totalAmount,
+          insuranceDeduction: p?.insuranceDeduction ?? 0,
+          discountDeduction: p?.discountDeduction ?? 0,
+          amount: p?.amount ?? row.totalAmount
         });
       });
     }
     
     if (!type || type === 'imaging' || type === 'all') {
-      const { count, rows } = await ImagingRequest.findAndCountAll({
+      const { rows } = await ImagingRequest.findAndCountAll({
         where,
         include: [
           {
             model: Patient,
             as: 'patient',
-            attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+            include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
           },
           {
             model: User,
@@ -772,7 +1049,7 @@ exports.getLabPayments = async (req, res, next) => {
           {
             model: Payment,
             as: 'payment',
-            attributes: ['id', 'status', 'method', 'amount'],
+            attributes: ['id', 'status', 'method', 'amount', 'amountBase', 'insuranceDeduction', 'discountDeduction'],
             required: false
           },
           {
@@ -782,13 +1059,11 @@ exports.getLabPayments = async (req, res, next) => {
             required: false
           }
         ],
-        limit: parseInt(limit),
-        offset: parseInt(offset),
+        limit: 1000,
         order: [['createdAt', 'DESC']],
         distinct: true
       });
       
-      // Filtrer par statut du paiement si spécifié
       let filteredRows = rows;
       if (status === 'pending') {
         filteredRows = rows.filter(row => !row.payment || row.payment.status === 'pending');
@@ -796,32 +1071,37 @@ exports.getLabPayments = async (req, res, next) => {
         filteredRows = rows.filter(row => row.payment && row.payment.status === 'paid');
       }
       
-      totalCount += filteredRows.length;
       filteredRows.forEach(row => {
-        // Utiliser le statut du paiement comme statut principal
         const paymentStatus = row.payment ? row.payment.status : 'pending';
-        requests.push({
+        const p = row.payment;
+        allRequests.push({
           id: row.id,
           type: 'imaging',
-          patient: row.patient,
+          patient: row.patient ? enrichPatientForDisplay(row.patient) : null,
           doctor: row.doctor,
           labTechnician: row.labTechnician ? {
             id: row.labTechnician.id,
             name: row.labTechnician.name,
             email: row.labTechnician.email
           } : null,
-          status: paymentStatus, // Utiliser le statut du paiement au lieu du statut de la demande
+          status: paymentStatus,
           totalAmount: row.totalAmount,
           paymentId: row.paymentId,
           paymentStatus: paymentStatus,
-          requestStatus: row.status, // Garder le statut de la demande séparément si nécessaire
-          createdAt: row.createdAt
+          requestStatus: row.status,
+          createdAt: row.createdAt,
+          amountBase: p?.amountBase ?? row.totalAmount,
+          insuranceDeduction: p?.insuranceDeduction ?? 0,
+          discountDeduction: p?.discountDeduction ?? 0,
+          amount: p?.amount ?? row.totalAmount
         });
       });
     }
     
-    // Trier par date de création
-    requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Trier par date de création puis paginer (10 par page)
+    allRequests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const totalCount = allRequests.length;
+    const requests = allRequests.slice(offset, offset + limitNum);
     
     // Statistiques - Calculer séparément pour lab et imaging puis additionner
     // Utiliser une jointure avec Payment pour vérifier le statut réel
@@ -943,9 +1223,9 @@ exports.getLabPayments = async (req, res, next) => {
         requests,
         pagination: {
           currentPage: parseInt(page),
-          totalPages: Math.ceil(totalCount / limit),
+          totalPages: Math.ceil(totalCount / limitNum) || 1,
           totalItems: totalCount,
-          itemsPerPage: parseInt(limit)
+          itemsPerPage: limitNum
         },
         stats: {
           total: totalCount,
@@ -962,6 +1242,89 @@ exports.getLabPayments = async (req, res, next) => {
 };
 
 /**
+ * Export Excel des paiements labo / imagerie (mêmes filtres que la liste).
+ */
+exports.exportLabPayments = async (req, res, next) => {
+  try {
+    const where = buildLabPaymentsWhere(req.query);
+    const { status, type } = req.query;
+    const includeCommon = [
+      { model: Patient, as: 'patient', include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }] },
+      { model: User, as: 'doctor', attributes: ['id', 'name', 'email'] },
+      { model: Payment, as: 'payment', attributes: ['id', 'status', 'method', 'amount', 'amountBase', 'insuranceDeduction'], required: false }
+    ];
+    const rows = [];
+    if (!type || type === 'lab' || type === 'all') {
+      const labRows = await LabRequest.findAll({ where, include: includeCommon, order: [['createdAt', 'DESC']] });
+      let filtered = labRows;
+      if (status === 'pending') filtered = labRows.filter(r => !r.payment || r.payment.status === 'pending');
+      else if (status === 'paid') filtered = labRows.filter(r => r.payment && r.payment.status === 'paid');
+      filtered.forEach(r => rows.push({ ...r.get({ plain: true }), type: 'lab' }));
+    }
+    if (!type || type === 'imaging' || type === 'all') {
+      const imagingRows = await ImagingRequest.findAll({ where, include: includeCommon, order: [['createdAt', 'DESC']] });
+      let filtered = imagingRows;
+      if (status === 'pending') filtered = imagingRows.filter(r => !r.payment || r.payment.status === 'pending');
+      else if (status === 'paid') filtered = imagingRows.filter(r => r.payment && r.payment.status === 'paid');
+      filtered.forEach(r => rows.push({ ...r.get({ plain: true }), type: 'imaging' }));
+    }
+    rows.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Paiements Labo & Imagerie');
+    sheet.columns = [
+      { header: 'Date', key: 'createdAt', width: 20 },
+      { header: 'Type', key: 'type', width: 10 },
+      { header: 'ID Vitalis', key: 'vitalisId', width: 15 },
+      { header: 'Patient', key: 'patientName', width: 30 },
+      { header: 'N° identifiant assureur', key: 'insuranceMemberNumber', width: 22 },
+      { header: 'Médecin', key: 'doctorName', width: 20 },
+      { header: 'Montant de base', key: 'amountBase', width: 14 },
+      { header: 'Montant payé par le patient', key: 'amountPaid', width: 22 },
+      { header: 'Montant pris en charge par l\'assureur', key: 'insuranceDeduction', width: 28 },
+      { header: 'Assurance %', key: 'insuranceCoveragePercent', width: 12 },
+      { header: 'Remise %', key: 'discountPercent', width: 10 },
+      { header: 'Assurance', key: 'insurance', width: 25 },
+      { header: 'Statut', key: 'paymentStatus', width: 14 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    const typeLibelle = { lab: 'Laboratoire', imaging: 'Imagerie' };
+    const statusLibelle = { paid: 'Payé', pending: 'En attente', cancelled: 'Annulé' };
+    rows.forEach(r => {
+      const patient = r.patient;
+      const patientData = patient && typeof patient.get === 'function' ? patient.get({ plain: true }) : (patient || {});
+      const insuranceMemberNumber = (patientData?.insuranceMemberNumber ?? patientData?.insurance_member_number ?? patient?.insuranceMemberNumber ?? patient?.insurance_member_number ?? '').toString().trim() || '';
+      const paymentStatus = r.payment ? r.payment.status : 'pending';
+      const baseAmount = (r.payment?.amountBase != null && r.payment.amountBase > 0) ? r.payment.amountBase : Number(r.totalAmount) || 0;
+      const amountPaid = r.payment?.amount ?? r.totalAmount;
+      sheet.addRow({
+        createdAt: r.createdAt,
+        type: typeLibelle[r.type] || r.type,
+        vitalisId: patient?.vitalisId ?? '',
+        patientName: patient ? `${patient.firstName} ${patient.lastName}` : '',
+        insuranceMemberNumber,
+        doctorName: r.doctor?.name ?? '',
+        amountBase: baseAmount,
+        amountPaid,
+        insuranceDeduction: r.payment?.insuranceDeduction != null ? Number(r.payment.insuranceDeduction) : 0,
+        insuranceCoveragePercent: patient?.insuranceCoveragePercent ?? patientData?.insuranceCoveragePercent ?? 0,
+        discountPercent: patient?.discountPercent ?? patientData?.discountPercent ?? 0,
+        insurance: patient?.insuranceEstablishment?.name || (patient?.isInsured ? 'Oui' : '') || 'Non',
+        paymentStatus: statusLibelle[paymentStatus] || paymentStatus
+      });
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = `paiements_labo_imagerie_${req.query.date || 'all'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Enregistrer le paiement d'une demande de laboratoire ou imagerie
  */
 exports.payLabRequest = async (req, res, next) => {
@@ -972,7 +1335,7 @@ exports.payLabRequest = async (req, res, next) => {
     console.log('Request body:', req.body);
     console.log('User:', req.user ? { id: req.user.id, role: req.user.role } : 'No user');
     
-    const { method, reference, assignToLab, labTechnicianId, type } = req.body;
+    const { method, reference, assignToLab, labTechnicianId, type, insurance, discount } = req.body;
     const user = req.user;
     const requestId = req.params.id;
     // type peut être dans body ou query (pour compatibilité)
@@ -1000,6 +1363,15 @@ exports.payLabRequest = async (req, res, next) => {
       return res.status(400).json(
         errorResponse('reference est requis pour orange_money', 400)
       );
+    }
+    
+    if (insurance?.isInsured === true) {
+      const memberNumber = (insurance?.memberNumber ?? insurance?.insuranceMemberNumber ?? '').toString().trim();
+      if (!memberNumber) {
+        return res.status(400).json(
+          errorResponse('Le numéro d\'identifiant assureur est obligatoire lorsque l\'assurance est activée', 400)
+        );
+      }
     }
     
     let request;
@@ -1036,27 +1408,73 @@ exports.payLabRequest = async (req, res, next) => {
         errorResponse('Demande non trouvée', 404)
       );
     }
+
+    // Mettre à jour les infos assurance/remise du patient si fournies
+    const patient = await Patient.findByPk(request.patientId);
+    if (patient && (insurance || discount)) {
+      const patientUpdates = {};
+      if (insurance) {
+        if (insurance.isInsured === true) {
+          const memberNumber = (insurance.memberNumber ?? insurance.insuranceMemberNumber ?? '').toString().trim();
+          if (memberNumber) patientUpdates.insuranceMemberNumber = memberNumber;
+          if (insurance.establishmentId) patientUpdates.insuranceEstablishmentId = insurance.establishmentId;
+          if (insurance.coveragePercent != null) patientUpdates.insuranceCoveragePercent = insurance.coveragePercent;
+          patientUpdates.isInsured = true;
+        } else if (insurance.isInsured === false) {
+          patientUpdates.isInsured = false;
+          patientUpdates.insuranceMemberNumber = null;
+          patientUpdates.insuranceEstablishmentId = null;
+          patientUpdates.insuranceCoveragePercent = null;
+        }
+      }
+      if (discount) {
+        if (discount.hasDiscount === true) {
+          if (discount.discountPercent != null) patientUpdates.discountPercent = discount.discountPercent;
+          patientUpdates.hasDiscount = true;
+        } else if (discount.hasDiscount === false) {
+          patientUpdates.hasDiscount = false;
+          patientUpdates.discountPercent = null;
+        }
+      }
+      if (Object.keys(patientUpdates).length > 0) {
+        await patient.update(patientUpdates);
+      }
+    }
     
     let payment;
     
     if (request.paymentId) {
-      // La demande a déjà un paiement (créé automatiquement) - mettre à jour le statut
-      console.log('💰 La demande a déjà un paiement, mise à jour du statut...');
-      console.log('  - paymentId existant:', request.paymentId);
+      // La demande a déjà un paiement (créé automatiquement) - recalculer assurance/remise puis mettre à jour
+      console.log('💰 La demande a déjà un paiement, mise à jour avec assurance/remise...');
       
       payment = await Payment.findByPk(request.paymentId);
       if (!payment) {
-        console.log('❌ Erreur: Paiement non trouvé:', request.paymentId);
         return res.status(404).json(
           errorResponse('Paiement associé non trouvé', 404)
         );
       }
       
-      console.log('  - Statut actuel du paiement:', payment.status);
-      console.log('  - Méthode actuelle:', payment.method);
+      const patient = await Patient.findByPk(request.patientId);
+      const baseAmount = Number(request.totalAmount) || 0;
+      const applyInsurance = requestType !== 'pharmacy';
+      const overrides = {};
+      if (insurance?.isInsured && insurance?.coveragePercent != null) overrides.insurancePercent = insurance.coveragePercent;
+      else if (insurance?.isInsured === false) overrides.insurancePercent = 0;
+      if (discount?.hasDiscount && discount?.discountPercent != null) overrides.discountPercent = discount.discountPercent;
+      else if (discount?.hasDiscount === false) overrides.discountPercent = 0;
+      const { insurancePercent, discountPercent } = patient
+        ? getPercentagesFromPatient(patient, overrides, applyInsurance)
+        : { insurancePercent: overrides.insurancePercent ?? 0, discountPercent: overrides.discountPercent ?? 0 };
+      const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
+        insurancePercent,
+        discountPercent
+      });
       
-      // Mettre à jour le paiement existant
       await payment.update({
+        amount: finalAmount,
+        amountBase,
+        insuranceDeduction,
+        discountDeduction,
         method,
         status: 'paid',
         reference: reference || payment.reference,
@@ -1074,25 +1492,39 @@ exports.payLabRequest = async (req, res, next) => {
       });
     } else {
       // Créer un nouveau paiement (pour les anciennes demandes sans paiement)
+      const patient = await Patient.findByPk(request.patientId);
+      const baseAmount = Number(request.totalAmount) || 0;
+      const applyInsurance = requestType !== 'pharmacy';
+      const overrides = {};
+      if (insurance?.isInsured && insurance?.coveragePercent != null) overrides.insurancePercent = insurance.coveragePercent;
+      else if (insurance?.isInsured === false) overrides.insurancePercent = 0;
+      if (discount?.hasDiscount && discount?.discountPercent != null) overrides.discountPercent = discount.discountPercent;
+      else if (discount?.hasDiscount === false) overrides.discountPercent = 0;
+      const { insurancePercent, discountPercent } = patient
+        ? getPercentagesFromPatient(patient, overrides, applyInsurance)
+        : { insurancePercent: overrides.insurancePercent ?? 0, discountPercent: overrides.discountPercent ?? 0 };
+      const { finalAmount, amountBase, insuranceDeduction, discountDeduction } = computePaymentAmount(baseAmount, {
+        insurancePercent,
+        discountPercent
+      });
       console.log('✅ Validation passée, création d\'un nouveau paiement...');
       console.log('💰 Création du paiement avec les données:');
       console.log('  - patientId:', request.patientId);
-      console.log('  - amount:', request.totalAmount);
+      console.log('  - amount (final):', finalAmount);
       console.log('  - method:', method);
       console.log('  - type:', requestType);
-      console.log('  - reference:', reference);
-      console.log('  - relatedId:', request.id);
-      console.log('  - createdBy:', user.id);
-      
       payment = await Payment.create({
         patientId: request.patientId,
-        amount: request.totalAmount,
+        amount: finalAmount,
         method,
         status: 'paid',
         type: requestType,
         reference: reference || null,
         relatedId: request.id,
-        createdBy: user.id
+        createdBy: user.id,
+        amountBase,
+        insuranceDeduction,
+        discountDeduction
       });
       
       console.log('✅ Paiement créé:', {
@@ -1195,7 +1627,7 @@ exports.getAssignments = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName']
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: DoctorAssignment,
@@ -1219,12 +1651,13 @@ exports.getAssignments = async (req, res, next) => {
     
     const patients = rows.map(payment => {
       const assignment = payment.doctorAssignments && payment.doctorAssignments.length > 0 ? payment.doctorAssignments[0] : null;
-      
+      const patientDisplay = payment.patient ? enrichPatientForDisplay(payment.patient) : null;
       return {
-        id: payment.patient.id,
-        vitalisId: payment.patient.vitalisId,
-        firstName: payment.patient.firstName,
-        lastName: payment.patient.lastName,
+        ...(patientDisplay || {}),
+        id: payment.patient?.id,
+        vitalisId: payment.patient?.vitalisId,
+        firstName: payment.patient?.firstName,
+        lastName: payment.patient?.lastName,
         payment: {
           id: payment.id,
           amount: payment.amount,
@@ -1291,18 +1724,25 @@ exports.createAssignment = async (req, res, next) => {
       );
     }
     
-    // Vérifier qu'il n'y a pas déjà une assignation active
+    // Vérifier qu'il n'y a pas déjà une assignation active (dossier non archivé)
     const existingAssignment = await DoctorAssignment.findOne({
       where: {
         patientId,
         status: { [Op.in]: ['assigned', 'in_consultation'] }
-      }
+      },
+      include: [{ model: ConsultationDossier, as: 'dossier', required: false }]
     });
-    
+
     if (existingAssignment) {
-      return res.status(400).json(
-        errorResponse('Le patient a déjà une assignation active', 400)
-      );
+      const dossier = existingAssignment.dossier;
+      if (dossier && dossier.status === 'archived') {
+        // Dossier archivé : marquer l'assignation comme terminée pour permettre une nouvelle assignation
+        await existingAssignment.update({ status: 'completed' });
+      } else {
+        return res.status(400).json(
+          errorResponse('Le patient a déjà une assignation active', 400)
+        );
+      }
     }
     
     // Créer l'assignation
@@ -1350,7 +1790,7 @@ exports.getDoctors = async (req, res, next) => {
         isActive: true,
         isSuspended: false
       },
-      attributes: ['id', 'name', 'email', 'department']
+      attributes: ['id', 'name', 'email', 'department', 'doctorIsAvailable']
     });
     
     // Compter les assignations actives pour chaque médecin
@@ -1368,12 +1808,41 @@ exports.getDoctors = async (req, res, next) => {
           name: doctor.name,
           email: doctor.email,
           department: doctor.department,
+          doctorIsAvailable: doctor.doctorIsAvailable !== false,
           activeAssignments
         };
       })
     );
     
     res.json(successResponse(doctorsWithCounts));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Activer ou désactiver la disponibilité d'un médecin pour nouvelles assignations
+ */
+exports.toggleDoctorAvailability = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { available } = req.body;
+    
+    const doctor = await User.findByPk(id);
+    if (!doctor || doctor.role !== 'doctor') {
+      return res.status(404).json(
+        errorResponse('Médecin non trouvé', 404)
+      );
+    }
+    
+    const newValue = available !== false;
+    await doctor.update({ doctorIsAvailable: newValue });
+    
+    res.json(successResponse({
+      id: doctor.id,
+      name: doctor.name,
+      doctorIsAvailable: doctor.doctorIsAvailable
+    }, newValue ? 'Médecin marqué comme disponible' : 'Médecin marqué comme indisponible'));
   } catch (error) {
     next(error);
   }

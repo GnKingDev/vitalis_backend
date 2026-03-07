@@ -53,6 +53,12 @@ const User = sequelize.define('User', {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },
+  doctorIsAvailable: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: true,
+    comment: 'Pour les médecins : disponible pour nouvelles assignations'
+  },
   lastLogin: {
     type: DataTypes.DATE,
     allowNull: true

@@ -40,6 +40,12 @@ router.post('/patients/:id/payment', authMiddleware, authorize(['reception', 'ad
 router.get('/payments', authMiddleware, authorize(['reception', 'admin']), paginationMiddleware, receptionController.getAllPayments);
 
 /**
+ * GET /api/v1/reception/payments/export
+ * Export Excel des paiements (mêmes filtres : date, type, search, isInsured, hasDiscount, insuranceEstablishmentId)
+ */
+router.get('/payments/export', authMiddleware, authorize(['reception', 'admin']), receptionController.exportPayments);
+
+/**
  * GET /api/v1/reception/payments/:id
  * Récupérer les détails d'un paiement
  */
@@ -52,6 +58,12 @@ router.get('/payments/:id', authMiddleware, authorize(['reception', 'admin']), r
  * Liste des demandes de laboratoire et imagerie pour paiement
  */
 router.get('/lab-payments', authMiddleware, authorize(['reception', 'admin']), paginationMiddleware, receptionController.getLabPayments);
+
+/**
+ * GET /api/v1/reception/lab-payments/export
+ * Export Excel des paiements labo/imagerie (mêmes filtres : date, status, type, search, isInsured, hasDiscount, insuranceEstablishmentId)
+ */
+router.get('/lab-payments/export', authMiddleware, authorize(['reception', 'admin']), receptionController.exportLabPayments);
 
 /**
  * POST /api/v1/reception/lab-payments/:id/pay
@@ -78,6 +90,12 @@ router.post('/assignments', authMiddleware, authorize(['reception', 'admin']), r
  * Liste tous les médecins disponibles
  */
 router.get('/doctors', authMiddleware, authorize(['reception', 'admin']), receptionController.getDoctors);
+
+/**
+ * PATCH /api/v1/reception/doctors/:id/availability
+ * Activer ou désactiver la disponibilité d'un médecin pour nouvelles assignations
+ */
+router.patch('/doctors/:id/availability', authMiddleware, authorize(['reception', 'admin']), receptionController.toggleDoctorAvailability);
 
 // ========== ROUTES LITS ==========
 

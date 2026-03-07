@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer');
 const config = require('../config');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const handlebars = require('handlebars');
 
 class PDFService {
@@ -55,10 +56,12 @@ class PDFService {
    */
   async generatePDF(html, options = {}) {
     const browser = await this.initBrowser();
-    
+    const templatesDir = path.join(__dirname, '../templates/pdf');
+    const baseURL = pathToFileURL(templatesDir).href + '/';
+
     try {
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      await page.setContent(html, { waitUntil: 'networkidle0', baseURL });
       
       const pdf = await page.pdf({
         format: options.format || 'A4',
@@ -79,11 +82,23 @@ class PDFService {
   }
 
   /**
+   * Charge le logo en base64 pour l'embedding dans le HTML
+   */
+  getLogoDataUri() {
+    const logoPath = path.join(__dirname, '../templates/pdf', 'logo-vitalis.png');
+    if (!fs.existsSync(logoPath)) return null;
+    const buffer = fs.readFileSync(logoPath);
+    return `data:image/png;base64,${buffer.toString('base64')}`;
+  }
+
+  /**
    * Génère un PDF à partir d'un template
    */
   async generatePDFFromTemplate(templateName, data, options = {}) {
     const template = this.loadTemplate(templateName);
-    const html = template(data);
+    const logoDataUri = this.getLogoDataUri();
+    const templateData = { ...data, logoDataUri };
+    const html = template(templateData);
     return await this.generatePDF(html, options);
   }
 
@@ -94,6 +109,10 @@ class PDFService {
     const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
+    const validator = labResult.validator || (labResult.validatorId && { name: 'Technicien labo' });
+    const signerName = validator?.name || 'Laboratoire Vitalis';
+    const labNumber = validator?.labNumber?.number || null;
+
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
       patientAge: calculateAge(patient.dateOfBirth),
@@ -101,10 +120,12 @@ class PDFService {
       labRequestId: labRequest.id.substring(0, 8).toUpperCase(),
       serviceDate: formatDate(labRequest.createdAt),
       doctorName: doctor.name,
-      sections: labResult.results.sections || [],
+      sections: (labResult.results && labResult.results.sections) || (labResult.results && labResult.results.results && labResult.results.results.sections) || [],
       notes: labRequest.notes || null,
       technicianNotes: labResult.technicianNotes || null,
-      generatedDate: formatDate(new Date())
+      generatedDate: formatDate(new Date()),
+      signerName,
+      labNumber
     };
 
     return await this.generatePDFFromTemplate('lab-result', data);
@@ -117,6 +138,10 @@ class PDFService {
     const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
+    const labTechnician = imagingRequest.labTechnician;
+    const signerName = labTechnician?.name || 'Service imagerie';
+    const labNumber = labTechnician?.labNumber?.number || null;
+
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
       patientAge: calculateAge(patient.dateOfBirth),
@@ -126,7 +151,9 @@ class PDFService {
       doctorName: doctor.name,
       exams: imagingRequest.exams || [],
       results: imagingRequest.results || '',
-      generatedDate: formatDate(new Date())
+      generatedDate: formatDate(new Date()),
+      signerName,
+      labNumber
     };
 
     return await this.generatePDFFromTemplate('imaging-result', data);
@@ -147,10 +174,34 @@ class PDFService {
       doctorName: doctor.name,
       items: items || [],
       notes: prescription.notes || null,
-      generatedDate: formatDate(new Date())
+      generatedDate: formatDate(new Date()),
+      signerName: doctor.name
     };
 
     return await this.generatePDFFromTemplate('prescription', data);
+  }
+
+  /**
+   * Génère le PDF d'un item personnalisé (résultat labo/imagerie externe)
+   */
+  async generateCustomItemPDF(customItem, patient, doctor) {
+    const { calculateAge } = require('../utils/ageCalculator');
+    const { formatDate } = require('../utils/dateFormatter');
+
+    const data = {
+      patientName: `${patient.firstName} ${patient.lastName}`,
+      patientAge: calculateAge(patient.dateOfBirth),
+      vitalisId: patient.vitalisId,
+      serviceDate: formatDate(customItem.createdAt),
+      doctorName: doctor.name,
+      itemName: customItem.name || 'Résultat examen externe',
+      itemDescription: customItem.description || 'Aucun détail fourni.',
+      itemRef: customItem.id ? customItem.id.substring(0, 8).toUpperCase() : '—',
+      generatedDate: formatDate(new Date()),
+      signerName: doctor.name
+    };
+
+    return await this.generatePDFFromTemplate('custom-item-result', data);
   }
 }
 

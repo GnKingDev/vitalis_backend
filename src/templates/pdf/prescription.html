@@ -11,6 +11,12 @@
       margin: 0;
       padding: 20px;
     }
+    .logo-img {
+      height: 60px;
+      width: auto;
+      display: block;
+      margin: 0 auto 12px;
+    }
     .header {
       text-align: center;
       margin-bottom: 30px;
@@ -91,6 +97,30 @@
       background-color: #ecf0f1;
       border-left: 4px solid #27ae60;
     }
+    .signature-section {
+      margin-top: 32px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .signature-block {
+      text-align: center;
+      min-width: 180px;
+    }
+    .signature-placeholder {
+      border: 1px dashed #999;
+      height: 60px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #999;
+    }
+    .signer-name {
+      font-size: 11px;
+      font-weight: bold;
+      margin: 0;
+    }
     .footer {
       margin-top: 40px;
       text-align: center;
@@ -103,6 +133,7 @@
 </head>
 <body>
   <div class="header">
+    {{#if logoDataUri}}<img src="{{logoDataUri}}" alt="Clinique Vitalis" class="logo-img" />{{/if}}
     <h1>VITALIS</h1>
     <h2>Centre Médical</h2>
     <h3>ORDONNANCE MÉDICALE</h3>
@@ -163,10 +194,19 @@
   </div>
   {{/if}}
 
+  <div class="signature-section">
+    <div class="signature-block">
+      <div class="signature-placeholder"></div>
+      <p class="signer-name">{{signerName}}</p>
+    </div>
+  </div>
+
   <div class="footer">
-    <p>Prescrit par: {{doctorName}}</p>
+    <p>Prescrit par : {{doctorName}}</p>
     <p>Document généré le {{generatedDate}}</p>
-    <p>VITALIS - Centre Médical</p>
+    <p>CLINIQUE VITALIS - Centre Médical</p>
+    <p>Siège : NONGO C/LAMBAGNY, République de Guinée</p>
+    <p>Numéro : +224 622 26 93 83</p>
   </div>
 </body>
 </html>

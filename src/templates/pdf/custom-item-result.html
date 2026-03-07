@@ -13,7 +13,6 @@
       padding: 20px;
       background: #fff;
     }
-    /* Header - Clinique VITALIS */
     .header {
       display: flex;
       justify-content: space-between;
@@ -21,32 +20,11 @@
       margin-bottom: 0;
       padding-bottom: 12px;
     }
-    .logo-block {
-      flex-shrink: 0;
-    }
+    .logo-block { flex-shrink: 0; }
     .logo-img {
       height: 60px;
       width: auto;
       display: block;
-    }
-    .logo-block .clinique {
-      font-size: 14px;
-      color: #333;
-      margin: 0;
-    }
-    .logo-block .vitalis {
-      font-size: 24px;
-      font-weight: bold;
-      color: #2563eb;
-      margin: 2px 0 0 0;
-      letter-spacing: 0.5px;
-    }
-    .gradient-line {
-      height: 4px;
-      background: linear-gradient(to right, #dc2626 0%, #2563eb 100%);
-      margin-top: 6px;
-      width: 120px;
-      border-radius: 2px;
     }
     .header-title {
       font-size: 18px;
@@ -55,13 +33,18 @@
       text-align: right;
       margin: 0;
     }
+    .header-subtitle {
+      font-size: 14px;
+      color: #2563eb;
+      font-weight: bold;
+      margin-top: 4px;
+    }
     .header-separator {
       height: 4px;
       background: linear-gradient(to right, #dc2626 0%, #2563eb 100%);
       margin: 16px 0 24px 0;
       border-radius: 2px;
     }
-    /* Patient & exam info */
     .info-section {
       display: flex;
       justify-content: space-between;
@@ -69,28 +52,15 @@
       margin-bottom: 24px;
       flex-wrap: wrap;
     }
-    .exam-info {
-      flex: 1;
-      min-width: 200px;
-    }
-    .exam-info p {
-      margin: 4px 0;
-      font-size: 12px;
-    }
+    .exam-info { flex: 1; min-width: 200px; }
+    .exam-info p { margin: 4px 0; font-size: 12px; }
     .patient-box {
       border: 1px solid #333;
       padding: 12px 16px;
       min-width: 220px;
     }
-    .patient-box p {
-      margin: 4px 0;
-      font-size: 12px;
-    }
-    .patient-box strong {
-      display: inline-block;
-      min-width: 100px;
-    }
-    /* Section header - style rapport */
+    .patient-box p { margin: 4px 0; font-size: 12px; }
+    .patient-box strong { display: inline-block; min-width: 100px; }
     .section-title {
       font-weight: bold;
       font-size: 14px;
@@ -99,49 +69,6 @@
       color: #2563eb;
       margin: 0 0 12px 0;
       border: 1px solid #d1d5db;
-    }
-    /* Exam list table */
-    .exam-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 20px;
-      font-size: 12px;
-    }
-    .exam-table th,
-    .exam-table td {
-      border: 1px solid #333;
-      padding: 8px 10px;
-      text-align: left;
-    }
-    .exam-table th {
-      font-weight: bold;
-      background: #f9fafb;
-    }
-    /* Results block - texte libre */
-    /* Signature et cachet */
-    .signature-section {
-      margin-top: 32px;
-      display: flex;
-      justify-content: flex-end;
-    }
-    .signature-block {
-      text-align: center;
-      min-width: 180px;
-    }
-    .signature-placeholder {
-      border: 1px dashed #999;
-      height: 60px;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      color: #999;
-    }
-    .signer-name {
-      font-size: 11px;
-      font-weight: bold;
-      margin: 0;
     }
     .results-block {
       padding: 16px;
@@ -153,17 +80,29 @@
       line-height: 1.6;
       margin-bottom: 24px;
     }
-    /* Footer */
+    .signature-section {
+      margin-top: 32px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .signature-block { text-align: center; min-width: 180px; }
+    .signature-placeholder {
+      border: 1px dashed #999;
+      height: 60px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #999;
+    }
+    .signer-name { font-size: 11px; font-weight: bold; margin: 0; }
     .footer-separator {
       height: 2px;
       background: #2563eb;
       margin: 32px 0 12px 0;
     }
-    .footer {
-      font-size: 10px;
-      color: #6b7280;
-      line-height: 1.5;
-    }
+    .footer { font-size: 10px; color: #6b7280; line-height: 1.5; }
     .footer p { margin: 2px 0; }
   </style>
 </head>
@@ -174,48 +113,26 @@
     </div>
     <h1 class="header-title">CLINIQUE VITALIS</h1>
   </div>
+  <div class="header-subtitle">RÉSULTAT EXAMEN EXTERNE</div>
   <div class="header-separator"></div>
 
   <div class="info-section">
     <div class="exam-info">
-      <p><strong>Demandé par Dr :</strong> {{doctorName}}</p>
-      <p><strong>Examen du :</strong> {{serviceDate}}</p>
+      <p><strong>Rédigé par Dr :</strong> {{doctorName}}</p>
+      <p><strong>Date de saisie :</strong> {{serviceDate}}</p>
       <p><strong>Document généré le :</strong> {{generatedDate}}</p>
     </div>
     <div class="patient-box">
       <p><strong>Nom patient :</strong> {{patientName}}</p>
       <p><strong>Code Patient :</strong> {{vitalisId}}</p>
       <p><strong>Âge :</strong> {{patientAge}} ans</p>
-      <p><strong>N° Imagerie :</strong> {{imagingRequestId}}</p>
-      {{#if labNumber}}
-      <p><strong>N° Lab technicien :</strong> {{labNumber}}</p>
-      {{/if}}
+      <p><strong>Réf. document :</strong> {{itemRef}}</p>
     </div>
   </div>
 
   <div class="section">
-    <div class="section-title">IMAGERIE - Examens demandés</div>
-    <table class="exam-table">
-      <thead>
-        <tr>
-          <th>Examen</th>
-          <th>Catégorie</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{#each exams}}
-        <tr>
-          <td><span style="color:#555;">—</span> {{name}}</td>
-          <td>{{category}}</td>
-        </tr>
-        {{/each}}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Résultats</div>
-    <div class="results-block">{{results}}</div>
+    <div class="section-title">{{itemName}}</div>
+    <div class="results-block">{{itemDescription}}</div>
   </div>
 
   <div class="signature-section">
@@ -227,7 +144,7 @@
 
   <div class="footer-separator"></div>
   <div class="footer">
-    <p>CLINIQUE VITALIS - Laboratoires d'analyses médicales</p>
+    <p>CLINIQUE VITALIS - Centre Médical</p>
     <p>Siège : NONGO C/LAMBAGNY, République de Guinée</p>
     <p>Numéro : +224 622 26 93 83</p>
   </div>

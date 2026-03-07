@@ -128,15 +128,9 @@ exports.getAllRequests = async (req, res, next) => {
     
     // Filtrage selon le rôle
     if (user.role === 'lab') {
-      // Lab: voir uniquement les demandes avec paymentId
       where.paymentId = { [Op.ne]: null };
-      // Le lab peut voir les demandes 'pending' ou 'sent_to_doctor' selon le paramètre status
-      if (status && (status === 'pending' || status === 'sent_to_doctor')) {
-        where.status = status;
-      } else {
-        // Par défaut, montrer les demandes 'pending'
-        where.status = 'pending';
-      }
+      // Lab: accepter le paramètre status pour le dashboard (pending ET sent_to_doctor)
+      where.status = status || 'pending';
       // Le filtre date est ignoré pour le lab (voir toutes les demandes, peu importe la date)
     } else if (user.role === 'doctor') {
       // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
@@ -167,7 +161,8 @@ exports.getAllRequests = async (req, res, next) => {
         where.status = status;
       }
     } else {
-      // Reception et Admin: voir toutes les demandes avec filtres optionnels
+      // Reception et Admin: voir les demandes en cours (pending) par défaut.
+      // Les "Fini et envoyé au médecin" (sent_to_doctor) ne doivent pas apparaître dans la liste lab.
       if (patientId) {
         where.patientId = patientId;
       }
@@ -176,18 +171,21 @@ exports.getAllRequests = async (req, res, next) => {
       }
       if (status) {
         where.status = status;
+      } else {
+        where.status = 'pending';
       }
     }
-    // Pour le rôle lab, ne jamais appliquer le filtre de date
-    // car on veut voir toutes les demandes en attente, peu importe leur date de création
-    if (date && user.role !== 'lab') {
+    // Appliquer le filtre date si fourni
+    // - pending: createdAt (date de création de la demande)
+    // - sent_to_doctor: updatedAt (date d'envoi au médecin) pour le dashboard "Total aujourd'hui"
+    if (date) {
       const startDate = new Date(date);
       startDate.setHours(0, 0, 0, 0);
       const endDate = new Date(date);
       endDate.setHours(23, 59, 59, 999);
-      where.createdAt = { [Op.between]: [startDate, endDate] };
+      const dateRange = { [Op.between]: [startDate, endDate] };
+      where[status === 'sent_to_doctor' ? 'updatedAt' : 'createdAt'] = dateRange;
     }
-    // Note: Pour le rôle lab, le paramètre date est complètement ignoré
     
     // Recherche textuelle dans les examens
     const examWhere = {};
@@ -497,7 +495,7 @@ exports.createRequest = async (req, res, next) => {
     // Calculer le montant total
     const totalAmount = exams.reduce((sum, exam) => sum + parseFloat(exam.price), 0);
     
-    // Créer automatiquement un paiement pour cette demande
+    // Créer automatiquement un paiement pour cette demande (montant de base toujours stocké)
     const payment = await Payment.create({
       patientId,
       amount: totalAmount,
@@ -506,7 +504,8 @@ exports.createRequest = async (req, res, next) => {
       type: 'lab',
       reference: `LAB-${Date.now()}`,
       relatedId: null, // Sera mis à jour après création de la demande
-      createdBy: doctorId // Le médecin qui crée la demande
+      createdBy: doctorId, // Le médecin qui crée la demande
+      amountBase: totalAmount
     });
     
     // Créer la demande avec le paymentId
@@ -946,6 +945,77 @@ exports.sendResult = async (req, res, next) => {
     });
     
     res.json(successResponse(null, 'Résultat envoyé au médecin'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Générer le PDF d'un résultat de laboratoire (id = labRequestId)
+ */
+exports.getRequestPDF = async (req, res, next) => {
+  const pdfService = require('../services/pdfService');
+  try {
+    const labRequestId = req.params.id;
+    const labRequest = await LabRequest.findByPk(labRequestId, {
+      include: [
+        {
+          model: Patient,
+          as: 'patient',
+          include: [{ model: require('../models').InsuranceEstablishment, as: 'insuranceEstablishment', required: false }]
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: { exclude: ['password'] }
+        },
+        {
+          model: LabResult,
+          as: 'results',
+          include: [{
+            model: User,
+            as: 'validator',
+            attributes: ['id', 'name'],
+            include: [{ model: require('../models').LabNumber, as: 'labNumber', attributes: ['number'], required: false }],
+            required: false
+          }]
+        }
+      ]
+    });
+
+    if (!labRequest) {
+      return res.status(404).json(
+        errorResponse('Demande de laboratoire non trouvée', 404)
+      );
+    }
+
+    const resultsList = labRequest.results
+      ? (Array.isArray(labRequest.results) ? labRequest.results : [labRequest.results])
+      : [];
+    const labResult = resultsList.length > 0
+      ? resultsList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+      : null;
+
+    if (!labResult) {
+      return res.status(404).json(
+        errorResponse('Aucun résultat validé pour cette demande', 404)
+      );
+    }
+
+    const patient = labRequest.patient;
+    const doctor = labRequest.doctor;
+
+    if (!patient || !doctor) {
+      return res.status(404).json(
+        errorResponse('Patient ou médecin introuvable', 404)
+      );
+    }
+
+    const pdf = await pdfService.generateLabResultPDF(labResult, labRequest, patient, doctor);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="resultat-lab-${labRequestId}.pdf"`);
+    res.send(pdf);
   } catch (error) {
     next(error);
   }

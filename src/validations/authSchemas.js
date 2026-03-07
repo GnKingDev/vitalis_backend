@@ -27,7 +27,8 @@ const registerSchema = Joi.object({
     'any.only': 'Le rôle doit être l\'un des suivants: admin, reception, doctor, lab, pharmacy',
     'any.required': 'Le rôle est requis'
   }),
-  department: Joi.string().max(100).allow(null, '').optional()
+  department: Joi.string().max(100).allow(null, '').optional(),
+  labNumberId: Joi.string().uuid().allow(null).optional()
 });
 
 module.exports = {

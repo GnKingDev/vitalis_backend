@@ -14,11 +14,13 @@ const {
   PrescriptionItem,
   Payment,
   ConsultationDossier,
-  DoctorAssignment
+  DoctorAssignment,
+  InsuranceEstablishment
 } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
 const { calculateAge } = require('../utils/ageCalculator');
+const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op } = require('sequelize');
 const ExcelJS = require('exceljs');
 
@@ -33,10 +35,10 @@ exports.getAllPatients = async (req, res, next) => {
     const where = {};
     if (search) {
       where[Op.or] = [
-        { firstName: { [Op.iLike]: `%${search}%` } },
-        { lastName: { [Op.iLike]: `%${search}%` } },
-        { vitalisId: { [Op.iLike]: `%${search}%` } },
-        { phone: { [Op.iLike]: `%${search}%` } }
+        { firstName: { [Op.like]: `%${search}%` } },
+        { lastName: { [Op.like]: `%${search}%` } },
+        { vitalisId: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } }
       ];
     }
     if (date) {
@@ -55,16 +57,21 @@ exports.getAllPatients = async (req, res, next) => {
           model: Bed,
           as: 'bed',
           required: false
+        },
+        {
+          model: InsuranceEstablishment,
+          as: 'insuranceEstablishment',
+          required: false,
+          attributes: ['id', 'name', 'code']
         }
       ],
       order: [['createdAt', 'DESC']]
     });
     
-    // Ajouter l'âge à chaque patient
-    const patients = rows.map(patient => ({
-      ...patient.toJSON(),
-      age: calculateAge(patient.dateOfBirth)
-    }));
+    const patients = rows.map(patient => {
+      const enriched = enrichPatientForDisplay(patient);
+      return { ...enriched, age: calculateAge(patient.dateOfBirth) };
+    });
     
     res.json(paginatedResponse(patients, { page: parseInt(page), limit: parseInt(limit) }, count));
   } catch (error) {
@@ -83,6 +90,12 @@ exports.getPatientById = async (req, res, next) => {
           model: Bed,
           as: 'bed',
           required: false
+        },
+        {
+          model: InsuranceEstablishment,
+          as: 'insuranceEstablishment',
+          required: false,
+          attributes: ['id', 'name', 'code']
         }
       ]
     });
@@ -94,7 +107,7 @@ exports.getPatientById = async (req, res, next) => {
     }
     
     const patientData = {
-      ...patient.toJSON(),
+      ...enrichPatientForDisplay(patient),
       age: calculateAge(patient.dateOfBirth)
     };
     
@@ -105,22 +118,34 @@ exports.getPatientById = async (req, res, next) => {
 };
 
 /**
- * Créer un nouveau patient
+ * Créer un nouveau patient.
+ * Accepte insurance: { isInsured, establishmentId, coveragePercent, memberNumber } et discount: { hasDiscount, discountPercent }.
  */
 exports.createPatient = async (req, res, next) => {
   try {
     const vitalisId = await generateVitalisId();
-    
-    const patient = await Patient.create({
-      ...req.body,
-      vitalisId
-    });
-    
-    const patientData = {
-      ...patient.toJSON(),
-      age: calculateAge(patient.dateOfBirth)
+    const { insurance, discount, ...rest } = req.body;
+    const isInsured = insurance?.isInsured === true;
+    const hasDiscount = discount?.hasDiscount === true;
+    const memberNumber = insurance?.memberNumber ?? insurance?.insuranceMemberNumber;
+    const payload = {
+      ...rest,
+      vitalisId,
+      isInsured: !!isInsured,
+      insuranceEstablishmentId: isInsured && (insurance?.establishmentId || insurance?.insuranceEstablishmentId) ? (insurance.establishmentId || insurance.insuranceEstablishmentId) : null,
+      insuranceCoveragePercent: isInsured && insurance?.coveragePercent != null ? insurance.coveragePercent : null,
+      insuranceMemberNumber: isInsured && memberNumber != null ? String(memberNumber).trim() || null : null,
+      hasDiscount: !!hasDiscount,
+      discountPercent: hasDiscount && discount?.discountPercent != null ? discount.discountPercent : null
     };
-    
+    const patient = await Patient.create(payload);
+    const created = await Patient.findByPk(patient.id, {
+      include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
+    });
+    const patientData = {
+      ...enrichPatientForDisplay(created),
+      age: calculateAge(created.dateOfBirth)
+    };
     res.status(201).json(successResponse(patientData));
   } catch (error) {
     next(error);
@@ -128,25 +153,35 @@ exports.createPatient = async (req, res, next) => {
 };
 
 /**
- * Modifier un patient
+ * Modifier un patient.
+ * Accepte insurance: { isInsured, establishmentId, coveragePercent, memberNumber } et discount: { hasDiscount, discountPercent }.
  */
 exports.updatePatient = async (req, res, next) => {
   try {
     const patient = await Patient.findByPk(req.params.id);
-    
     if (!patient) {
       return res.status(404).json(
         errorResponse('Patient non trouvé', 404)
       );
     }
-    
-    await patient.update(req.body);
-    
+    const { insurance, discount, ...rest } = req.body;
+    const updates = { ...rest };
+    if (insurance !== undefined) {
+      const memberNumber = insurance?.memberNumber ?? insurance?.insuranceMemberNumber;
+      updates.isInsured = insurance?.isInsured === true;
+      updates.insuranceEstablishmentId = updates.isInsured && (insurance?.establishmentId || insurance?.insuranceEstablishmentId) ? (insurance.establishmentId || insurance.insuranceEstablishmentId) : null;
+      updates.insuranceCoveragePercent = updates.isInsured && insurance?.coveragePercent != null ? insurance.coveragePercent : null;
+      updates.insuranceMemberNumber = updates.isInsured && memberNumber != null ? String(memberNumber).trim() || null : null;
+    }
+    if (discount !== undefined) {
+      updates.hasDiscount = discount?.hasDiscount === true;
+      updates.discountPercent = updates.hasDiscount && discount?.discountPercent != null ? discount.discountPercent : null;
+    }
+    await patient.update(updates);
     const patientData = {
       ...patient.toJSON(),
       age: calculateAge(patient.dateOfBirth)
     };
-    
     res.json(successResponse(patientData));
   } catch (error) {
     next(error);
@@ -231,18 +266,18 @@ exports.searchPatients = async (req, res, next) => {
     const patients = await Patient.findAll({
       where: {
         [Op.or]: [
-          { firstName: { [Op.iLike]: `%${q}%` } },
-          { lastName: { [Op.iLike]: `%${q}%` } },
-          { vitalisId: { [Op.iLike]: `%${q}%` } },
-          { phone: { [Op.iLike]: `%${q}%` } }
+          { firstName: { [Op.like]: `%${q}%` } },
+          { lastName: { [Op.like]: `%${q}%` } },
+          { vitalisId: { [Op.like]: `%${q}%` } },
+          { phone: { [Op.like]: `%${q}%` } }
         ]
       },
       limit: parseInt(limit),
-      attributes: ['id', 'vitalisId', 'firstName', 'lastName', 'phone'],
+      include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }],
       order: [['createdAt', 'DESC']]
     });
     
-    res.json(successResponse(patients));
+    res.json(successResponse(patients.map(p => enrichPatientForDisplay(p))));
   } catch (error) {
     next(error);
   }
@@ -258,10 +293,10 @@ exports.exportPatients = async (req, res, next) => {
     const where = {};
     if (search) {
       where[Op.or] = [
-        { firstName: { [Op.iLike]: `%${search}%` } },
-        { lastName: { [Op.iLike]: `%${search}%` } },
-        { vitalisId: { [Op.iLike]: `%${search}%` } },
-        { phone: { [Op.iLike]: `%${search}%` } }
+        { firstName: { [Op.like]: `%${search}%` } },
+        { lastName: { [Op.like]: `%${search}%` } },
+        { vitalisId: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } }
       ];
     }
     if (date) {
@@ -337,8 +372,9 @@ exports.getPatientHistory = async (req, res, next) => {
     const patientId = req.params.id;
     const userRole = req.user.role;
     
-    // Récupérer le patient
-    const patient = await Patient.findByPk(patientId);
+    const patient = await Patient.findByPk(patientId, {
+      include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
+    });
     if (!patient) {
       return res.status(404).json(
         errorResponse('Patient non trouvé', 404)
@@ -346,7 +382,7 @@ exports.getPatientHistory = async (req, res, next) => {
     }
     
     const patientData = {
-      ...patient.toJSON(),
+      ...enrichPatientForDisplay(patient),
       age: calculateAge(patient.dateOfBirth)
     };
     
@@ -610,7 +646,7 @@ exports.getDossierById = async (req, res, next) => {
         {
           model: Patient,
           as: 'patient',
-          attributes: ['id', 'vitalisId', 'firstName', 'lastName', 'phone']
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
         },
         {
           model: User,
@@ -637,14 +673,12 @@ exports.getDossierById = async (req, res, next) => {
       );
     }
     
-    // Vérifier les permissions pour les médecins
     if (user.role === 'doctor' && dossier.doctorId !== user.id) {
       return res.status(403).json(
         errorResponse('Accès refusé. Ce dossier ne vous appartient pas.', 403)
       );
     }
     
-    // Récupérer les demandes de laboratoire
     const labRequests = await LabRequest.findAll({
       where: {
         patientId: dossier.patientId,
@@ -712,7 +746,7 @@ exports.getDossierById = async (req, res, next) => {
     res.json(successResponse({
       id: dossier.id,
       patientId: dossier.patientId,
-      patient: dossier.patient,
+      patient: enrichPatientForDisplay(dossier.patient),
       doctorId: dossier.doctorId,
       doctor: dossier.doctor,
       consultationId: dossier.consultationId,
