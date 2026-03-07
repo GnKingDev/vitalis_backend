@@ -30,7 +30,7 @@ const PharmacyProduct = sequelize.define('PharmacyProduct', {
   },
   salePrice: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
+    allowNull: true, // nullable en BDD pour lignes existantes ; requis à la création (controller)
     validate: {
       min: 0
     }
