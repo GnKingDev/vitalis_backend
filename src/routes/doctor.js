@@ -4,6 +4,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 const { paginationMiddleware } = require('../middleware/pagination');
 const doctorController = require('../controllers/doctorController');
+const appointmentController = require('../controllers/appointmentController');
 
 // ========== ROUTE DISPONIBILITÉ ==========
 
@@ -26,6 +27,20 @@ router.get('/results', authMiddleware, authorize(['doctor', 'admin']), paginatio
  * Récupérer les détails d'un résultat
  */
 router.get('/results/:id', authMiddleware, authorize(['doctor', 'admin']), doctorController.getResultById);
+
+// ========== ROUTES RENDEZ-VOUS ==========
+
+/**
+ * GET /api/v1/doctor/appointments
+ * Liste des rendez-vous du médecin connecté
+ */
+router.get('/appointments', authMiddleware, authorize(['doctor', 'admin']), paginationMiddleware, appointmentController.getMyAppointments);
+
+/**
+ * POST /api/v1/doctor/appointments
+ * Créer un rendez-vous (médecin : pour un patient, à sa charge)
+ */
+router.post('/appointments', authMiddleware, authorize(['doctor', 'admin']), appointmentController.create);
 
 // ========== ROUTES DOSSIERS ==========
 

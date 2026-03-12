@@ -137,4 +137,10 @@ router.patch('/beds/:id/free', authMiddleware, authorize(['reception', 'admin'])
  */
 router.get('/stats', authMiddleware, authorize(['reception', 'admin']), receptionController.getStats);
 
+/**
+ * GET /api/v1/reception/dossiers/archived
+ * Liste des dossiers archivés (sans détail médical)
+ */
+router.get('/dossiers/archived', authMiddleware, authorize(['reception', 'admin']), paginationMiddleware, receptionController.getArchivedDossiers);
+
 module.exports = router;

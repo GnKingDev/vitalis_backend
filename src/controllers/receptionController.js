@@ -1,4 +1,4 @@
-const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice, ConsultationType } = require('../models');
+const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice, ConsultationType, Appointment } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
 const { calculateAge } = require('../utils/ageCalculator');
@@ -1746,12 +1746,18 @@ exports.getAssignments = async (req, res, next) => {
  */
 exports.createAssignment = async (req, res, next) => {
   try {
-    const { patientId, doctorId, paymentId } = req.body;
+    const { patientId, doctorId, paymentId, isAppointment, appointmentDate, appointmentTime, appointmentAt } = req.body;
     const user = req.user;
     
     if (!patientId || !doctorId || !paymentId) {
       return res.status(400).json(
         errorResponse('patientId, doctorId et paymentId sont requis', 400)
+      );
+    }
+    
+    if (isAppointment && !appointmentAt && (!appointmentDate || !appointmentTime)) {
+      return res.status(400).json(
+        errorResponse('Pour un rendez-vous, indiquez appointmentAt (ISO) ou appointmentDate et appointmentTime', 400)
       );
     }
     
@@ -1817,7 +1823,27 @@ exports.createAssignment = async (req, res, next) => {
       status: 'active'
     });
     
-    res.status(201).json(successResponse({
+    let appointment = null;
+    if (isAppointment) {
+      let at;
+      if (appointmentAt) {
+        at = new Date(appointmentAt);
+      } else {
+        at = new Date(`${appointmentDate}T${appointmentTime}:00`);
+      }
+      if (!isNaN(at.getTime())) {
+        appointment = await Appointment.create({
+          patientId,
+          doctorId,
+          appointmentAt: at,
+          status: 'scheduled',
+          assignmentId: assignment.id,
+          createdBy: user.id
+        });
+      }
+    }
+    
+    const responsePayload = {
       id: assignment.id,
       patientId: assignment.patientId,
       doctorId: assignment.doctorId,
@@ -1828,7 +1854,16 @@ exports.createAssignment = async (req, res, next) => {
         status: dossier.status
       },
       createdAt: assignment.createdAt
-    }));
+    };
+    if (appointment) {
+      responsePayload.appointment = {
+        id: appointment.id,
+        appointmentAt: appointment.appointmentAt,
+        status: appointment.status
+      };
+    }
+    
+    res.status(201).json(successResponse(responsePayload));
   } catch (error) {
     next(error);
   }
@@ -2220,6 +2255,75 @@ exports.getStats = async (req, res, next) => {
     }));
   } catch (error) {
     console.error('❌ Erreur dans getStats:', error);
+    next(error);
+  }
+};
+
+/**
+ * Liste des dossiers archivés (réception / admin) — sans détail médical
+ */
+exports.getArchivedDossiers = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    const where = { status: 'archived' };
+    const patientWhere = {};
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`;
+      patientWhere[Op.or] = [
+        { firstName: { [Op.like]: term } },
+        { lastName: { [Op.like]: term } },
+        { vitalisId: { [Op.like]: term } }
+      ];
+    }
+
+    const { count, rows } = await ConsultationDossier.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Patient,
+          as: 'patient',
+          attributes: ['id', 'firstName', 'lastName', 'vitalisId'],
+          required: true,
+          ...(Object.keys(patientWhere).length ? { where: patientWhere } : {})
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'archivedByUser',
+          attributes: ['id', 'name'],
+          required: false
+        }
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['archivedAt', 'DESC']]
+    });
+
+    const dossiers = rows.map(d => {
+      const j = d.toJSON();
+      return {
+        id: j.id,
+        patientId: j.patientId,
+        status: j.status,
+        archivedAt: j.archivedAt,
+        patient: j.patient,
+        doctor: j.doctor,
+        archivedByUser: j.archivedByUser
+      };
+    });
+
+    res.json(paginatedResponse(
+      { dossiers },
+      { page: parseInt(page), limit: parseInt(limit) },
+      count
+    ));
+  } catch (error) {
     next(error);
   }
 };

@@ -524,13 +524,6 @@ exports.getPatientDossiers = async (req, res, next) => {
     
     const offset = (page - 1) * limit;
     
-    // Vérifier les permissions
-    if (user.role === 'reception') {
-      return res.status(403).json(
-        errorResponse('Accès refusé. Les réceptionnistes ne peuvent pas accéder aux dossiers.', 403)
-      );
-    }
-    
     // Vérifier que le patient existe
     const patient = await Patient.findByPk(patientId);
     if (!patient) {
@@ -564,6 +557,12 @@ exports.getPatientDossiers = async (req, res, next) => {
       where.status = status;
     }
     
+    // Réception : pas d'accès aux détails (consultation, labo, ordonnances)
+    const isReception = user.role === 'reception';
+    const effectiveIncludeConsultation = isReception ? false : (includeConsultation !== 'false');
+    const effectiveIncludeLabRequests = isReception ? false : (includeLabRequests !== 'false');
+    const effectiveIncludePrescriptions = isReception ? false : (includePrescriptions !== 'false');
+    
     // Récupérer les dossiers avec pagination
     const { count, rows: dossiers } = await ConsultationDossier.findAndCountAll({
       where,
@@ -579,7 +578,7 @@ exports.getPatientDossiers = async (req, res, next) => {
           attributes: ['id', 'name'],
           required: false
         },
-        ...(includeConsultation !== 'false' ? [{
+        ...(effectiveIncludeConsultation ? [{
           model: Consultation,
           as: 'consultation',
           required: false,
@@ -591,32 +590,46 @@ exports.getPatientDossiers = async (req, res, next) => {
       order: [['createdAt', 'DESC']]
     });
     
-    // Récupérer les IDs des demandes labo et ordonnances pour chaque dossier
+    // Récupérer les IDs des demandes labo et ordonnances pour chaque dossier (jamais pour réception)
     const dossiersWithData = await Promise.all(dossiers.map(async (dossier) => {
       const consultationId = dossier.consultationId;
-      
+      const json = dossier.toJSON();
+      // Réception : ne renvoyer que les champs nécessaires pour lister et archiver (pas de détail consultation)
+      if (isReception) {
+        return {
+          id: json.id,
+          patientId: json.patientId,
+          doctorId: json.doctorId,
+          status: json.status,
+          assignmentId: json.assignmentId,
+          consultationId: json.consultationId,
+          createdAt: json.createdAt,
+          updatedAt: json.updatedAt,
+          completedAt: json.completedAt,
+          archivedAt: json.archivedAt,
+          doctor: json.doctor,
+          archivedByUser: json.archivedByUser
+        };
+      }
       const dossierData = {
-        ...dossier.toJSON(),
+        ...json,
         labRequestIds: [],
         prescriptionIds: []
       };
-      
-      if (includeLabRequests !== 'false' && consultationId) {
+      if (effectiveIncludeLabRequests && consultationId) {
         const labRequests = await LabRequest.findAll({
           where: { consultationId },
           attributes: ['id']
         });
         dossierData.labRequestIds = labRequests.map(r => r.id);
       }
-      
-      if (includePrescriptions !== 'false' && consultationId) {
+      if (effectiveIncludePrescriptions && consultationId) {
         const prescriptions = await Prescription.findAll({
           where: { consultationId },
           attributes: ['id']
         });
         dossierData.prescriptionIds = prescriptions.map(p => p.id);
       }
-      
       return dossierData;
     }));
     

@@ -251,7 +251,7 @@ exports.completeDossier = async (req, res, next) => {
 };
 
 /**
- * Archive un dossier de consultation (uniquement par médecin)
+ * Archive un dossier de consultation (médecin, réception ou admin)
  */
 exports.archiveDossier = async (req, res, next) => {
   try {
@@ -259,10 +259,10 @@ exports.archiveDossier = async (req, res, next) => {
     const user = req.user;
     const dossierId = req.params.id;
     
-    // Vérifier que l'utilisateur est un médecin
-    if (user.role !== 'doctor') {
+    const canArchive = ['doctor', 'reception', 'admin'].includes(user.role);
+    if (!canArchive) {
       return res.status(403).json(
-        errorResponse('Seul un médecin peut archiver un dossier', 403)
+        errorResponse('Vous n\'êtes pas autorisé à archiver un dossier', 403)
       );
     }
     
@@ -281,8 +281,8 @@ exports.archiveDossier = async (req, res, next) => {
       );
     }
     
-    // Vérifier que le médecin est le propriétaire du dossier
-    if (dossier.doctorId !== user.id) {
+    // Médecin : uniquement ses dossiers ; réception/admin : tous les dossiers terminés
+    if (user.role === 'doctor' && dossier.doctorId !== user.id) {
       return res.status(403).json(
         errorResponse('Vous n\'êtes pas autorisé à archiver ce dossier', 403)
       );
