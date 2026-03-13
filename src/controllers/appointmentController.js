@@ -60,7 +60,9 @@ exports.getAll = async (req, res, next) => {
   try {
     const user = req.user;
     const { page = 1, limit = 20, date, doctorId, status, search, patientId } = req.query;
-    const offset = (page - 1) * limit;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
 
     const where = {};
     if (date) {
@@ -95,8 +97,8 @@ exports.getAll = async (req, res, next) => {
         },
         { model: User, as: 'doctor', attributes: ['id', 'name'] }
       ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: limitNum,
+      offset,
       order: [['appointmentAt', 'ASC']]
     });
 
@@ -110,7 +112,7 @@ exports.getAll = async (req, res, next) => {
 
     res.json(paginatedResponse(
       { appointments: list },
-      { page: parseInt(page), limit: parseInt(limit) },
+      { page: pageNum, limit: limitNum },
       count
     ));
   } catch (error) {
