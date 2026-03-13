@@ -194,12 +194,6 @@ exports.getAllRequests = async (req, res, next) => {
       ];
     }
     
-    // Debug: console.log les filtres appliqués
-    console.log('🔬 === IMAGING REQUESTS DEBUG ===');
-    console.log('🔬 User role:', user.role);
-    console.log('🔬 Query params:', { page, limit, patientId, doctorId, status, date, search });
-    console.log('🔬 Where clause final:', JSON.stringify(where, null, 2));
-    
     const { count, rows } = await ImagingRequest.findAndCountAll({
       where,
       include: [
@@ -252,40 +246,6 @@ exports.getAllRequests = async (req, res, next) => {
       order: [['createdAt', 'DESC']],
       distinct: true
     });
-    
-    console.log('🔬 Total count from query:', count);
-    console.log('🔬 Rows found:', rows.length);
-    
-    if (rows.length > 0) {
-      console.log('🔬 First request found:', {
-        id: rows[0].id,
-        status: rows[0].status,
-        paymentId: rows[0].paymentId,
-        createdAt: rows[0].createdAt,
-        hasPayment: !!rows[0].payment,
-        paymentStatus: rows[0].payment ? rows[0].payment.status : 'N/A'
-      });
-    } else {
-      console.log('🔬 ⚠️ Aucune demande trouvée avec ces critères');
-      // Vérifier pourquoi
-      const allRequests = await ImagingRequest.findAll({
-        attributes: ['id', 'status', 'paymentId', 'createdAt'],
-        include: [{
-          model: Payment,
-          as: 'payment',
-          attributes: ['id', 'status'],
-          required: false
-        }],
-        limit: 5
-      });
-      console.log('🔬 Toutes les demandes dans la base (échantillon):', allRequests.map(r => ({
-        id: r.id,
-        status: r.status,
-        paymentId: r.paymentId,
-        paymentStatus: r.payment ? r.payment.status : 'N/A'
-      })));
-    }
-    console.log('🔬 ================================');
     
     // Formater les résultats
     const requests = rows.map(request => ({

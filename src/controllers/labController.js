@@ -196,12 +196,6 @@ exports.getAllRequests = async (req, res, next) => {
       ];
     }
     
-    // Debug: console.log les filtres appliqués
-    console.log('🔬 === LAB REQUESTS DEBUG ===');
-    console.log('🔬 User role:', user.role);
-    console.log('🔬 Query params:', { page, limit, patientId, doctorId, status, date, search });
-    console.log('🔬 Where clause final:', JSON.stringify(where, null, 2));
-    
     const { count, rows } = await LabRequest.findAndCountAll({
       where,
       include: [
@@ -262,40 +256,6 @@ exports.getAllRequests = async (req, res, next) => {
       order: [['createdAt', 'DESC']],
       distinct: true
     });
-    
-    console.log('🔬 Total count from query:', count);
-    console.log('🔬 Rows found:', rows.length);
-    
-    if (rows.length > 0) {
-      console.log('🔬 First request found:', {
-        id: rows[0].id,
-        status: rows[0].status,
-        paymentId: rows[0].paymentId,
-        createdAt: rows[0].createdAt,
-        hasPayment: !!rows[0].payment,
-        paymentStatus: rows[0].payment ? rows[0].payment.status : 'N/A'
-      });
-    } else {
-      console.log('🔬 ⚠️ Aucune demande trouvée');
-      // Vérifier pourquoi
-      const allRequests = await LabRequest.findAll({
-        attributes: ['id', 'status', 'paymentId', 'createdAt'],
-        include: [{
-          model: Payment,
-          as: 'payment',
-          attributes: ['id', 'status'],
-          required: false
-        }],
-        limit: 5
-      });
-      console.log('🔬 Toutes les demandes dans la base (échantillon):', allRequests.map(r => ({
-        id: r.id,
-        status: r.status,
-        paymentId: r.paymentId,
-        paymentStatus: r.payment ? r.payment.status : 'N/A'
-      })));
-    }
-    console.log('🔬 ================================');
     
     // Formater les résultats
     const requests = rows.map(request => ({
@@ -837,10 +797,15 @@ exports.createOrUpdateResult = async (req, res, next) => {
       );
     }
     
-    // Vérifier que l'utilisateur est le technicien assigné ou admin
-    if (user.role !== 'admin' && labRequest.labTechnicianId !== user.id) {
+    // Admin ou technicien lab : autorisé si demande non assignée (labTechnicianId null) ou si c'est le technicien assigné
+    if (user.role !== 'admin' && user.role !== 'lab') {
       return res.status(403).json(
-        errorResponse('Vous n\'êtes pas autorisé à modifier ce résultat', 403)
+        errorResponse('Accès réservé au laboratoire ou à l\'admin', 403)
+      );
+    }
+    if (user.role === 'lab' && labRequest.labTechnicianId != null && labRequest.labTechnicianId !== user.id) {
+      return res.status(403).json(
+        errorResponse('Cette demande est assignée à un autre technicien', 403)
       );
     }
     

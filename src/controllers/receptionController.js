@@ -2150,82 +2150,34 @@ exports.freeBed = async (req, res, next) => {
  */
 exports.getStats = async (req, res, next) => {
   try {
-    console.log('=== GET RECEPTION STATS DEBUG ===');
     const { date } = req.query;
-    console.log('Query params:', { date });
-    
     const targetDate = date ? new Date(date) : new Date();
     targetDate.setHours(0, 0, 0, 0);
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
-    
-    console.log('📅 Dates calculées:');
-    console.log('  - targetDate:', targetDate.toISOString());
-    console.log('  - nextDay:', nextDay.toISOString());
-    
-    // Vérifier les assignations avant le calcul
-    const allAssignments = await DoctorAssignment.findAll({
-      attributes: ['id', 'status', 'createdAt', 'patientId'],
-      include: [{
-        model: Patient,
-        as: 'patient',
-        attributes: ['id', 'vitalisId', 'firstName', 'lastName']
-      }],
-      order: [['createdAt', 'DESC']]
-    });
-    
-    console.log('📋 Toutes les assignations dans la DB:');
-    allAssignments.forEach(assign => {
-      console.log(`  - ID: ${assign.id.substring(0, 8)}... | Status: ${assign.status} | Patient: ${assign.patient ? assign.patient.vitalisId : 'N/A'} | Created: ${assign.createdAt.toISOString()}`);
-    });
-    
-    const assignedCount = await DoctorAssignment.count({ where: { status: 'assigned' } });
-    const inConsultationCount = await DoctorAssignment.count({ where: { status: 'in_consultation' } });
-    const completedCount = await DoctorAssignment.count({ where: { status: 'completed' } });
-    
-    console.log('📊 Comptage des assignations par statut:');
-    console.log('  - assigned:', assignedCount);
-    console.log('  - in_consultation:', inConsultationCount);
-    console.log('  - completed:', completedCount);
-    
-    // Calculer pendingAssignments : patients avec paiement consultation payé mais sans assignation active
-    // Récupérer tous les patients avec un paiement de consultation payé
+
+    // Patients avec paiement consultation payé
     const patientsWithPaidConsultation = await Payment.findAll({
-      where: {
-        type: 'consultation',
-        status: 'paid'
-      },
+      where: { type: 'consultation', status: 'paid' },
       attributes: ['patientId'],
       group: ['patientId'],
       raw: true
     });
-    
     const patientIdsWithPaidConsultation = patientsWithPaidConsultation.map(p => p.patientId);
-    console.log('💰 Patients avec paiement consultation payé:', patientIdsWithPaidConsultation.length);
-    console.log('  - IDs:', patientIdsWithPaidConsultation.map(id => id.substring(0, 8) + '...'));
-    
-    // Récupérer tous les patients avec une assignation active
+
+    // Patients avec assignation active
     const patientsWithActiveAssignment = await DoctorAssignment.findAll({
-      where: {
-        status: { [Op.in]: ['assigned', 'in_consultation'] }
-      },
+      where: { status: { [Op.in]: ['assigned', 'in_consultation'] } },
       attributes: ['patientId'],
       group: ['patientId'],
       raw: true
     });
-    
     const patientIdsWithActiveAssignment = patientsWithActiveAssignment.map(a => a.patientId);
-    console.log('👨‍⚕️ Patients avec assignation active:', patientIdsWithActiveAssignment.length);
-    console.log('  - IDs:', patientIdsWithActiveAssignment.map(id => id.substring(0, 8) + '...'));
-    
-    // Patients avec paiement payé mais sans assignation active
+
     const pendingPatientIds = patientIdsWithPaidConsultation.filter(
       patientId => !patientIdsWithActiveAssignment.includes(patientId)
     );
-    
-    console.log('⏳ Patients en attente d\'assignation:', pendingPatientIds.length);
-    console.log('  - IDs:', pendingPatientIds.map(id => id.substring(0, 8) + '...'));
-    
+
     const [patientsToday, paymentsToday, revenueToday, bedsOccupied, bedsAvailable] = await Promise.all([
       Patient.count({ where: { createdAt: { [Op.gte]: targetDate, [Op.lt]: nextDay } } }),
       Payment.count({ where: { createdAt: { [Op.gte]: targetDate, [Op.lt]: nextDay } } }),
@@ -2235,16 +2187,7 @@ exports.getStats = async (req, res, next) => {
     ]);
     
     const pendingAssignments = pendingPatientIds.length;
-    
-    console.log('📈 Résultats des statistiques:');
-    console.log('  - patientsToday:', patientsToday);
-    console.log('  - paymentsToday:', paymentsToday);
-    console.log('  - pendingAssignments:', pendingAssignments);
-    console.log('  - revenueToday:', revenueToday);
-    console.log('  - bedsOccupied:', bedsOccupied);
-    console.log('  - bedsAvailable:', bedsAvailable);
-    console.log('========================');
-    
+
     res.json(successResponse({
       patientsToday: patientsToday || 0,
       paymentsToday: paymentsToday || 0,
@@ -2254,7 +2197,6 @@ exports.getStats = async (req, res, next) => {
       bedsAvailable: bedsAvailable || 0
     }));
   } catch (error) {
-    console.error('❌ Erreur dans getStats:', error);
     next(error);
   }
 };
