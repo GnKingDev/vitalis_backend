@@ -4,7 +4,14 @@ const { authMiddleware } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 const { paginationMiddleware } = require('../middleware/pagination');
 const pharmacyController = require('../controllers/pharmacyController');
+const pharmacyUnitController = require('../controllers/pharmacyUnitController');
 const pharmacyCategoryRoutes = require('./pharmacyCategories');
+
+// ========== ROUTES UNITÉS ==========
+router.get('/units', authMiddleware, pharmacyUnitController.getAll);
+router.post('/units', authMiddleware, authorize(['pharmacy', 'admin']), pharmacyUnitController.create);
+router.put('/units/:id', authMiddleware, authorize(['pharmacy', 'admin']), pharmacyUnitController.update);
+router.delete('/units/:id', authMiddleware, authorize(['pharmacy', 'admin']), pharmacyUnitController.delete);
 
 // ========== ROUTES CATÉGORIES ==========
 router.use('/categories', pharmacyCategoryRoutes);

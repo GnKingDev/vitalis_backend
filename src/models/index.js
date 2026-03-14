@@ -16,6 +16,7 @@ const Prescription = require('./Prescription');
 const PrescriptionItem = require('./PrescriptionItem');
 const PharmacyProduct = require('./PharmacyProduct');
 const PharmacyCategory = require('./PharmacyCategory');
+const PharmacyUnit = require('./PharmacyUnit');
 const PaymentItem = require('./PaymentItem');
 const DoctorAssignment = require('./DoctorAssignment');
 const ConsultationDossier = require('./ConsultationDossier');
@@ -45,6 +46,7 @@ const models = {
   PrescriptionItem,
   PharmacyProduct,
   PharmacyCategory,
+  PharmacyUnit,
   PaymentItem,
   DoctorAssignment,
   ConsultationDossier,

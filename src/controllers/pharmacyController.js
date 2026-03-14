@@ -13,7 +13,7 @@ const ExcelJS = require('exceljs');
  */
 exports.getAllProducts = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, search, category, lowStock, outOfStock } = req.query;
+    const { page = 1, limit = 10, search, category, unit, lowStock, outOfStock } = req.query;
     const offset = (page - 1) * limit;
     
     const where = {};
@@ -23,6 +23,9 @@ exports.getAllProducts = async (req, res, next) => {
     }
     if (category) {
       where.category = category;
+    }
+    if (unit) {
+      where.unit = unit;
     }
     if (lowStock === 'true') {
       where[Op.and] = [
@@ -412,9 +415,13 @@ exports.getPaymentById = async (req, res, next) => {
       id: payment.id,
       patient: payment.patient ? enrichPatientForDisplay(payment.patient) : null,
       amount: payment.amount,
+      amountBase: payment.amountBase,
+      insuranceDeduction: payment.insuranceDeduction,
+      discountDeduction: payment.discountDeduction,
       method: payment.method,
       status: payment.status,
       type: payment.type,
+      reference: payment.reference,
       items: payment.items.map(item => ({
         id: item.id,
         product: item.product,
