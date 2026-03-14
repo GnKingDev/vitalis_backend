@@ -128,10 +128,9 @@ exports.getAllRequests = async (req, res, next) => {
     
     // Filtrage selon le rôle
     if (user.role === 'lab') {
-      // Lab: voir uniquement les demandes en cours (pending). Les "Fini et envoyé au médecin" (sent_to_doctor) ne doivent pas apparaître.
-      where.paymentId = { [Op.ne]: null };
-      where.status = 'pending';
-      // Le filtre date est ignoré pour le lab (voir toutes les demandes, peu importe la date)
+      if (status) {
+        where.status = status;
+      }
     } else if (user.role === 'doctor') {
       // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
       if (patientId) {
@@ -174,16 +173,13 @@ exports.getAllRequests = async (req, res, next) => {
         where.status = 'pending';
       }
     }
-    // Pour le rôle lab, ne jamais appliquer le filtre de date
-    // car on veut voir toutes les demandes, peu importe leur date de création
-    if (date && user.role !== 'lab') {
+    if (date) {
       const startDate = new Date(date);
       startDate.setHours(0, 0, 0, 0);
       const endDate = new Date(date);
       endDate.setHours(23, 59, 59, 999);
       where.createdAt = { [Op.between]: [startDate, endDate] };
     }
-    // Note: Pour le rôle lab, le paramètre date est complètement ignoré
     
     // Recherche textuelle dans les examens
     const examWhere = {};
@@ -232,14 +228,13 @@ exports.getAllRequests = async (req, res, next) => {
             required: Object.keys(examWhere).length > 0 ? false : false
           }]
         },
-        // Pour le rôle lab, inclure Payment pour vérifier le statut
-        ...(user.role === 'lab' ? [{
+        // Inclure Payment pour tous les rôles (optionnel)
+        {
           model: Payment,
           as: 'payment',
           attributes: ['id', 'status'],
-          where: { status: 'paid' },
-          required: true
-        }] : [])
+          required: false
+        }
       ],
       limit: limitNum,
       offset: offset,

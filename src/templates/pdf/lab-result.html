@@ -218,27 +218,17 @@
     <table class="results-table">
       <thead>
         <tr>
-          <th>Paramètres</th>
-          <th>Résultats</th>
-          <th>Unité</th>
-          <th>Valeurs usuelles</th>
-          <th>Statut</th>
+          <th>Numérotation</th>
+          <th>Résultat</th>
+          <th>Valeurs normales</th>
         </tr>
       </thead>
       <tbody>
         {{#each items}}
         <tr>
-          <td><span class="param-prefix">—</span> {{name}}</td>
+          <td><span class="param-prefix">—</span> {{numero}}</td>
           <td style="text-align: center;">{{value}}</td>
-          <td>{{unit}}</td>
           <td>{{reference}}</td>
-          <td>
-            {{#if status}}
-              <span class="status-{{status}}">{{status}}</span>
-            {{else}}
-              —
-            {{/if}}
-          </td>
         </tr>
         {{/each}}
       </tbody>

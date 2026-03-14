@@ -128,10 +128,9 @@ exports.getAllRequests = async (req, res, next) => {
     
     // Filtrage selon le rôle
     if (user.role === 'lab') {
-      where.paymentId = { [Op.ne]: null };
-      // Lab: accepter le paramètre status pour le dashboard (pending ET sent_to_doctor)
-      where.status = status || 'pending';
-      // Le filtre date est ignoré pour le lab (voir toutes les demandes, peu importe la date)
+      if (status) {
+        where.status = status;
+      }
     } else if (user.role === 'doctor') {
       // Doctor: voir uniquement ses propres demandes ou celles de ses patients assignés
       if (patientId) {
@@ -242,14 +241,13 @@ exports.getAllRequests = async (req, res, next) => {
           limit: 1,
           order: [['createdAt', 'DESC']]
         },
-        // Pour le rôle lab, inclure Payment pour vérifier le statut
-        ...(user.role === 'lab' ? [{
+        // Inclure Payment pour tous les rôles (optionnel)
+        {
           model: Payment,
           as: 'payment',
           attributes: ['id', 'status'],
-          where: { status: 'paid' },
-          required: true
-        }] : [])
+          required: false
+        }
       ],
       limit: limitNum,
       offset: offset,
