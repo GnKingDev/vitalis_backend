@@ -34,12 +34,13 @@ async function resetPassword() {
 
     const hashedPassword = await bcrypt.hash('12345678', 10);
 
-    const [rowsAffected] = await sequelize.query(
+    const [result] = await sequelize.query(
       'UPDATE users SET password = ?, lastLogin = NULL WHERE LOWER(email) = LOWER(?)',
       { replacements: [hashedPassword, email.trim()] }
     );
 
-    if (rowsAffected > 0) {
+    const affected = result?.affectedRows ?? result;
+    if (affected > 0) {
       console.log(`✓ Mot de passe réinitialisé pour : ${email}`);
       console.log(`✓ Nouveau mot de passe : 12345678`);
       console.log(`✓ L'utilisateur devra changer son mot de passe à la prochaine connexion.`);
