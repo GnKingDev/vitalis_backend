@@ -24,10 +24,10 @@ async function resetPassword() {
     }
   }
 
-  if (!email) {
+  if (!email) { 
     console.error('Usage: node src/scripts/reset-password.js --email "user@example.com"');
     process.exit(1);
-  }
+  } 
 
   try {
     await sequelize.authenticate();

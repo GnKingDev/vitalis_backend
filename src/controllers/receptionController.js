@@ -1,7 +1,6 @@
 const { Patient, Payment, Bed, DoctorAssignment, ConsultationDossier, LabRequest, ImagingRequest, User, InsuranceEstablishment, ConsultationPrice, ConsultationType, Appointment } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
-const { calculateAge } = require('../utils/ageCalculator');
 const { computePaymentAmount, getPercentagesFromPatient } = require('../utils/paymentAmountHelper');
 const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op, Sequelize } = require('sequelize');
@@ -124,7 +123,7 @@ exports.getAllPatients = async (req, res, next) => {
         lastName: patient.lastName,
         phone: patient.phone,
         email: patient.email,
-        age: calculateAge(patient.dateOfBirth),
+        age: patient.age,
         gender: patient.gender,
         bed: patient.bed ? {
           id: patient.bed.id,
@@ -265,13 +264,12 @@ exports.getPatientById = async (req, res, next) => {
       vitalisId: patient.vitalisId,
       firstName: patient.firstName,
       lastName: patient.lastName,
-      dateOfBirth: patient.dateOfBirth,
+      age: patient.age,
       gender: patient.gender,
       phone: patient.phone,
       email: patient.email,
       address: patient.address,
       emergencyContact: patient.emergencyContact,
-      age: calculateAge(patient.dateOfBirth),
       bed: patient.bed,
       payment: paymentDisplay,
       assignment: assignment ? {
@@ -298,13 +296,13 @@ exports.registerPatient = async (req, res, next) => {
     console.log('req.body.discount:', JSON.stringify(req.body?.discount, null, 2));
     console.log('Content-Type:', req.get('Content-Type'));
 
-    const { firstName, lastName, dateOfBirth, gender, phone, email, address, emergencyContact, payment, bedId, assignDoctor, doctorId, insurance, discount } = req.body;
+    const { firstName, lastName, age, gender, phone, email, address, emergencyContact, payment, bedId, assignDoctor, doctorId, insurance, discount } = req.body;
     const user = req.user;
 
     // Validation
-    if (!firstName || !lastName || !dateOfBirth || !gender || !phone || !payment) {
+    if (!firstName || !lastName || age == null || !gender || !phone || !payment) {
       return res.status(400).json(
-        errorResponse('firstName, lastName, dateOfBirth, gender, phone et payment sont requis', 400)
+        errorResponse('firstName, lastName, age, gender, phone et payment sont requis', 400)
       );
     }
     
@@ -340,7 +338,7 @@ exports.registerPatient = async (req, res, next) => {
       vitalisId,
       firstName,
       lastName,
-      dateOfBirth,
+      age: parseInt(age, 10),
       gender,
       phone,
       email: email || null,

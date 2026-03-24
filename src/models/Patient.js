@@ -31,12 +31,12 @@ const Patient = sequelize.define('Patient', {
       len: [2, 50]
     }
   },
-  dateOfBirth: {
-    type: DataTypes.DATEONLY,
+  age: {
+    type: DataTypes.INTEGER,
     allowNull: false,
     validate: {
-      isDate: true,
-      isBefore: new Date().toISOString()
+      min: 0,
+      max: 150
     }
   },
   gender: {

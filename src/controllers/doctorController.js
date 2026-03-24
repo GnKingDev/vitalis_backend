@@ -2,7 +2,6 @@ const { LabRequest, LabResult, LabRequestExam, LabExam, ImagingRequest, ImagingR
 const { Op, Sequelize } = require('sequelize');
 const sequelize = require('../models/sequelize');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
-const { calculateAge } = require('../utils/ageCalculator');
 const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 
 // ========== ROUTE DISPONIBILITÉ ==========
@@ -492,7 +491,7 @@ exports.getAllDossiers = async (req, res, next) => {
         id: dossier.id,
         patient: {
           ...(patientPayload || {}),
-          age: dossier.patient ? calculateAge(dossier.patient.dateOfBirth) : null,
+          age: dossier.patient ? dossier.patient.age : null,
           gender: dossier.patient?.gender
         },
         assignment: dossier.assignment,

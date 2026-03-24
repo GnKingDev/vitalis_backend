@@ -1,7 +1,7 @@
 const { Patient, Consultation, Payment, LabRequest, ImagingRequest, User, Bed, PharmacyProduct } = require('../models');
 const { successResponse } = require('../utils/responseHelper');
 const { Op, Sequelize } = require('sequelize');
-const { calculateAge, getAgeGroup } = require('../utils/ageCalculator');
+const { getAgeGroup } = require('../utils/ageCalculator');
 
 /**
  * Vue d'ensemble des statistiques générales
@@ -164,7 +164,7 @@ exports.getPatientsStats = async (req, res, next) => {
       }),
       Patient.findAll({
         where: dateFilter,
-        attributes: ['id', 'dateOfBirth', 'gender']
+        attributes: ['id', 'age', 'gender']
       })
     ]);
     
@@ -182,8 +182,8 @@ exports.getPatientsStats = async (req, res, next) => {
     };
     
     allPatients.forEach(patient => {
-      if (patient.dateOfBirth) {
-        const ageGroup = getAgeGroup(patient.dateOfBirth);
+      if (patient.age != null) {
+        const ageGroup = getAgeGroup(patient.age);
         ageGroupStats[ageGroup]++;
       }
     });

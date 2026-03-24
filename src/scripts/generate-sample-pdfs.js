@@ -14,7 +14,7 @@ const pdfService = require('../services/pdfService');
 const samplePatient = {
   firstName: 'Mamadou',
   lastName: 'Diallo',
-  dateOfBirth: '1990-05-15',
+  age: 35,
   vitalisId: 'VTL-2026-00001',
 };
 

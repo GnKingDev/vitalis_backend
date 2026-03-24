@@ -106,7 +106,6 @@ class PDFService {
    * Génère le PDF d'un résultat de laboratoire
    */
   async generateLabResultPDF(labResult, labRequest, patient, doctor) {
-    const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
     const validator = labResult.validator || (labResult.validatorId && { name: 'Technicien labo' });
@@ -115,7 +114,7 @@ class PDFService {
 
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientAge: calculateAge(patient.dateOfBirth),
+      patientAge: patient.age,
       vitalisId: patient.vitalisId,
       labRequestId: labRequest.id.substring(0, 8).toUpperCase(),
       serviceDate: formatDate(labRequest.createdAt),
@@ -135,7 +134,6 @@ class PDFService {
    * Génère le PDF d'un résultat d'imagerie
    */
   async generateImagingResultPDF(imagingRequest, patient, doctor) {
-    const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
     const labTechnician = imagingRequest.labTechnician;
@@ -144,7 +142,7 @@ class PDFService {
 
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientAge: calculateAge(patient.dateOfBirth),
+      patientAge: patient.age,
       vitalisId: patient.vitalisId,
       imagingRequestId: imagingRequest.id.substring(0, 8).toUpperCase(),
       serviceDate: formatDate(imagingRequest.createdAt),
@@ -163,12 +161,11 @@ class PDFService {
    * Génère le PDF d'une ordonnance
    */
   async generatePrescriptionPDF(prescription, patient, doctor, items) {
-    const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientAge: calculateAge(patient.dateOfBirth),
+      patientAge: patient.age,
       vitalisId: patient.vitalisId,
       prescriptionDate: formatDate(prescription.createdAt),
       doctorName: doctor.name,
@@ -185,12 +182,11 @@ class PDFService {
    * Génère le PDF d'un item personnalisé (résultat labo/imagerie externe)
    */
   async generateCustomItemPDF(customItem, patient, doctor) {
-    const { calculateAge } = require('../utils/ageCalculator');
     const { formatDate } = require('../utils/dateFormatter');
 
     const data = {
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientAge: calculateAge(patient.dateOfBirth),
+      patientAge: patient.age,
       vitalisId: patient.vitalisId,
       serviceDate: formatDate(customItem.createdAt),
       doctorName: doctor.name,

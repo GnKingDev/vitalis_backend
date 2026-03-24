@@ -19,7 +19,6 @@ const {
 } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { generateVitalisId } = require('../utils/vitalisIdGenerator');
-const { calculateAge } = require('../utils/ageCalculator');
 const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op } = require('sequelize');
 const ExcelJS = require('exceljs');
@@ -70,7 +69,7 @@ exports.getAllPatients = async (req, res, next) => {
     
     const patients = rows.map(patient => {
       const enriched = enrichPatientForDisplay(patient);
-      return { ...enriched, age: calculateAge(patient.dateOfBirth) };
+      return { ...enriched };
     });
     
     const pageNum = parseInt(page);
@@ -115,10 +114,9 @@ exports.getPatientById = async (req, res, next) => {
     }
     
     const patientData = {
-      ...enrichPatientForDisplay(patient),
-      age: calculateAge(patient.dateOfBirth)
+      ...enrichPatientForDisplay(patient)
     };
-    
+
     res.json(successResponse(patientData));
   } catch (error) {
     next(error);
@@ -151,8 +149,7 @@ exports.createPatient = async (req, res, next) => {
       include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false, attributes: ['id', 'name', 'code'] }]
     });
     const patientData = {
-      ...enrichPatientForDisplay(created),
-      age: calculateAge(created.dateOfBirth)
+      ...enrichPatientForDisplay(created)
     };
     res.status(201).json(successResponse(patientData));
   } catch (error) {
@@ -187,8 +184,7 @@ exports.updatePatient = async (req, res, next) => {
     }
     await patient.update(updates);
     const patientData = {
-      ...patient.toJSON(),
-      age: calculateAge(patient.dateOfBirth)
+      ...patient.toJSON()
     };
     res.json(successResponse(patientData));
   } catch (error) {
@@ -327,7 +323,6 @@ exports.exportPatients = async (req, res, next) => {
     worksheet.columns = [
       { header: 'ID Vitalis', key: 'vitalisId', width: 15 },
       { header: 'Nom complet', key: 'fullName', width: 30 },
-      { header: 'Date de naissance', key: 'dateOfBirth', width: 15 },
       { header: 'Âge', key: 'age', width: 10 },
       { header: 'Sexe', key: 'gender', width: 10 },
       { header: 'Téléphone', key: 'phone', width: 15 },
@@ -350,8 +345,7 @@ exports.exportPatients = async (req, res, next) => {
       worksheet.addRow({
         vitalisId: patient.vitalisId,
         fullName: `${patient.firstName} ${patient.lastName}`,
-        dateOfBirth: patient.dateOfBirth,
-        age: calculateAge(patient.dateOfBirth),
+        age: patient.age,
         gender: patient.gender === 'M' ? 'Masculin' : 'Féminin',
         phone: patient.phone,
         email: patient.email || '',
@@ -390,10 +384,9 @@ exports.getPatientHistory = async (req, res, next) => {
     }
     
     const patientData = {
-      ...enrichPatientForDisplay(patient),
-      age: calculateAge(patient.dateOfBirth)
+      ...enrichPatientForDisplay(patient)
     };
-    
+
     // Récupérer les consultations
     const consultations = await Consultation.findAll({
       where: { patientId },
