@@ -31,9 +31,9 @@ const InsuranceExamPrice = sequelize.define('InsuranceExamPrice', {
   tableName: 'insurance_exam_prices',
   timestamps: true,
   indexes: [
-    { fields: ['insuranceEstablishmentId'] },
-    { fields: ['examId', 'examType'] },
-    { unique: true, fields: ['insuranceEstablishmentId', 'examId', 'examType'] }
+    { name: 'idx_iep_insurance', fields: ['insuranceEstablishmentId'] },
+    { name: 'idx_iep_exam', fields: ['examId', 'examType'] },
+    { name: 'uq_iep_insurance_exam', unique: true, fields: ['insuranceEstablishmentId', 'examId', 'examType'] }
   ]
 });
 

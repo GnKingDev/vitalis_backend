@@ -55,11 +55,11 @@ module.exports = {
       updatedAt: { type: Sequelize.DATE, allowNull: false }
     });
 
-    await queryInterface.addIndex('insurance_exam_prices', ['insuranceEstablishmentId']);
-    await queryInterface.addIndex('insurance_exam_prices', ['examId', 'examType']);
+    await queryInterface.addIndex('insurance_exam_prices', ['insuranceEstablishmentId'], { name: 'idx_iep_insurance' });
+    await queryInterface.addIndex('insurance_exam_prices', ['examId', 'examType'], { name: 'idx_iep_exam' });
     await queryInterface.addIndex('insurance_exam_prices',
       ['insuranceEstablishmentId', 'examId', 'examType'],
-      { unique: true, name: 'unique_insurance_exam_price' }
+      { unique: true, name: 'uq_iep_insurance_exam' }
     );
   },
 
