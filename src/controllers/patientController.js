@@ -1099,8 +1099,37 @@ exports.getPatientTimeline = async (req, res, next) => {
     
     // Trier par date (plus récent en premier)
     timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
+
     res.json(successResponse(timeline));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Supprimer un patient (admin uniquement)
+ * DELETE /api/v1/patients/:id
+ * Le patient ne peut être supprimé que s'il n'a pas de paiements associés.
+ */
+exports.deletePatient = async (req, res, next) => {
+  try {
+    const patient = await Patient.findByPk(req.params.id, {
+      include: [{ model: Payment, as: 'payments', required: false }]
+    });
+
+    if (!patient) {
+      return res.status(404).json(errorResponse('Patient non trouvé', 404));
+    }
+
+    if (patient.payments && patient.payments.length > 0) {
+      return res.status(400).json(errorResponse(
+        'Impossible de supprimer un patient ayant des paiements enregistrés. Annulez d\'abord les paiements.',
+        400
+      ));
+    }
+
+    await patient.destroy();
+    res.json(successResponse(null, 'Patient supprimé avec succès'));
   } catch (error) {
     next(error);
   }

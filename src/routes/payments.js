@@ -40,6 +40,12 @@ router.delete('/:id', authMiddleware, authorize(['admin']), paymentController.de
 // ========== ROUTES STATISTIQUES ==========
 
 /**
+ * GET /api/v1/payments/:id/invoice
+ * Télécharger la facture PDF d'un paiement
+ */
+router.get('/:id/invoice', authMiddleware, paymentController.generateInvoicePDF);
+
+/**
  * GET /api/v1/payments/stats
  * Statistiques détaillées sur les paiements
  */

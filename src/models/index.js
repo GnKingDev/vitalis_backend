@@ -25,6 +25,7 @@ const CustomItem = require('./CustomItem');
 const ConsultationPrice = require('./ConsultationPrice');
 const ConsultationType = require('./ConsultationType');
 const InsuranceEstablishment = require('./InsuranceEstablishment');
+const InsuranceExamPrice = require('./InsuranceExamPrice');
 const LabNumber = require('./LabNumber');
 const Appointment = require('./Appointment');
 
@@ -54,6 +55,7 @@ const models = {
   CustomItem,
   ConsultationPrice,
   ConsultationType,
+  InsuranceExamPrice,
   LabNumber,
   Appointment,
   sequelize
@@ -201,6 +203,8 @@ ConsultationType.belongsTo(User, { foreignKey: 'updatedBy', as: 'updater' });
 
 // ========== RELATIONS INSURANCE ESTABLISHMENT ==========
 InsuranceEstablishment.hasMany(Patient, { foreignKey: 'insuranceEstablishmentId', as: 'patients' });
+InsuranceEstablishment.hasMany(InsuranceExamPrice, { foreignKey: 'insuranceEstablishmentId', as: 'examPrices' });
+InsuranceExamPrice.belongsTo(InsuranceEstablishment, { foreignKey: 'insuranceEstablishmentId', as: 'insurance' });
 
 // ========== RELATIONS LAB NUMBER ==========
 LabNumber.belongsTo(User, { foreignKey: 'userId', as: 'user' });

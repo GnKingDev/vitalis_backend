@@ -27,6 +27,7 @@ const consultationTypesRoutes = require('./routes/consultationTypes');
 const insuranceEstablishmentRoutes = require('./routes/insuranceEstablishments');
 const labNumberRoutes = require('./routes/labNumbers');
 const appointmentRoutes = require('./routes/appointments');
+const devisRoutes = require('./routes/devis');
 
 const app = express();
 
@@ -80,6 +81,7 @@ app.use('/api/v1/consultation/types', consultationTypesRoutes);
 app.use('/api/v1/insurance-establishments', insuranceEstablishmentRoutes);
 app.use('/api/v1/lab-numbers', labNumberRoutes);
 app.use('/api/v1/appointments', appointmentRoutes);
+app.use('/api/v1/devis', devisRoutes);
 
 // Route 404
 app.use((req, res) => {

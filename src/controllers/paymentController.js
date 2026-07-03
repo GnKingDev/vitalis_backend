@@ -1,4 +1,5 @@
 const { Payment, Patient, User, LabRequest, ImagingRequest, PaymentItem, PharmacyProduct, InsuranceEstablishment } = require('../models');
+const pdfService = require('../services/pdfService');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { enrichPatientForDisplay } = require('../utils/patientDisplayHelper');
 const { Op, Sequelize } = require('sequelize');
@@ -322,6 +323,8 @@ exports.createPayment = async (req, res, next) => {
       }
     }
     
+    const { amountBase, insuranceDeduction, discountDeduction, acompte } = req.body;
+
     const payment = await Payment.create({
       patientId,
       amount,
@@ -331,7 +334,10 @@ exports.createPayment = async (req, res, next) => {
       reference: reference || null,
       relatedId: relatedId || null,
       createdBy: user.id,
-      amountBase: amount
+      amountBase: amountBase != null ? amountBase : amount,
+      insuranceDeduction: insuranceDeduction || 0,
+      discountDeduction: discountDeduction || 0,
+      acompte: acompte || 0
     });
     
     // Lier le paiement à la ressource si fournie
@@ -561,6 +567,57 @@ exports.getStats = async (req, res, next) => {
     });
     
     res.json(successResponse(stats));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Générer le PDF de la facture d'un paiement
+ * GET /api/v1/payments/:id/invoice
+ */
+exports.generateInvoicePDF = async (req, res, next) => {
+  try {
+    const payment = await Payment.findByPk(req.params.id, {
+      include: [
+        {
+          model: Patient,
+          as: 'patient',
+          include: [{ model: InsuranceEstablishment, as: 'insuranceEstablishment', required: false }]
+        },
+        { model: PaymentItem, as: 'items', required: false }
+      ]
+    });
+
+    if (!payment) {
+      return res.status(404).json(errorResponse('Paiement non trouvé', 404));
+    }
+
+    // Construire la liste des items depuis PaymentItems ou données brutes
+    const items = (payment.items || []).map(item => ({
+      label: item.description || item.name || 'Prestation',
+      typeLabel: item.itemType || payment.type,
+      price: parseFloat(item.unitPrice || item.amount || 0)
+    }));
+
+    // Si pas d'items détaillés, créer un item générique
+    if (items.length === 0) {
+      const typeLabels = { consultation: 'Consultation', lab: 'Laboratoire', imaging: 'Imagerie', pharmacy: 'Pharmacie' };
+      items.push({
+        label: typeLabels[payment.type] || 'Prestation médicale',
+        typeLabel: payment.type,
+        price: parseFloat(payment.amountBase || payment.amount)
+      });
+    }
+
+    const pdf = await pdfService.generateInvoicePDF(payment, payment.patient, items);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="facture-${payment.id.substring(0, 8).toUpperCase()}.pdf"`,
+      'Content-Length': pdf.length
+    });
+    res.end(pdf);
   } catch (error) {
     next(error);
   }

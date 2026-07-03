@@ -678,3 +678,43 @@ exports.getRequestPDF = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Supprimer une demande d'imagerie (admin uniquement)
+ * DELETE /api/v1/imaging/requests/:id
+ */
+exports.deleteRequest = async (req, res, next) => {
+  try {
+    const request = await ImagingRequest.findByPk(req.params.id);
+    if (!request) {
+      return res.status(404).json(errorResponse('Demande d\'imagerie non trouvée', 404));
+    }
+    if (request.paymentId) {
+      return res.status(400).json(errorResponse(
+        'Impossible de supprimer une demande déjà payée. Annulez d\'abord le paiement.',
+        400
+      ));
+    }
+    await request.destroy();
+    res.json(successResponse(null, 'Demande d\'imagerie supprimée'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Supprimer un examen d'imagerie du catalogue (admin uniquement)
+ * DELETE /api/v1/imaging/exams/:id
+ */
+exports.deleteExam = async (req, res, next) => {
+  try {
+    const exam = await ImagingExam.findByPk(req.params.id);
+    if (!exam) {
+      return res.status(404).json(errorResponse('Examen non trouvé', 404));
+    }
+    await exam.update({ isActive: false });
+    res.json(successResponse(null, 'Examen désactivé'));
+  } catch (error) {
+    next(error);
+  }
+};

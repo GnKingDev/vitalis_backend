@@ -49,7 +49,7 @@ Tous les éléments principaux du backend ont été implémentés de manière pr
 - ✅ DoctorAssignment (Assignation Médecin)
 - ✅ ConsultationDossier (Dossier de Consultation)
 - ✅ Bed (Lit)
-- ✅ CustomItem (Item Personnalisé)
+- ✅ CustomItem (Item Personnalisé) 
 
 **Toutes les relations entre modèles sont définies dans `models/index.js`**
 
@@ -59,8 +59,8 @@ Tous les éléments principaux du backend ont été implémentés de manière pr
 
 ### 7. Contrôleurs ✅
 - ✅ AuthController (Authentification complète)
-- ✅ PatientController (CRUD + stats + search)
-- ✅ ConsultationController (CRUD + complete)
+- ✅ PatientController (CRUD + stats + search) 
+- ✅ ConsultationController (CRUD + complete) 
 
 ### 8. Routes API ✅
 - ✅ Routes d'authentification (`/api/v1/auth`)
@@ -217,7 +217,7 @@ backend/
 - ✅ Validation des données
 - ✅ Gestion d'erreurs centralisée
 - ✅ Pagination
-- ✅ Documentation complète
+- ✅ Documentation complète 
 
 ## 📝 Notes importantes
 
@@ -229,4 +229,4 @@ backend/
 
 ---
 
-**Le backend VITALIS est maintenant prêt à être utilisé ! 🚀**
+**Le backend VITALIS est maintenant prêt à être utilisé ! 🚀** 

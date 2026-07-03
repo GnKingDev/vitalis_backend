@@ -25,6 +25,12 @@ router.post('/exams', authMiddleware, authorize(['admin']), labController.create
  */
 router.put('/exams/:id', authMiddleware, authorize(['admin']), labController.updateExam);
 
+/**
+ * DELETE /api/v1/lab/exams/:id
+ * Désactiver un examen du catalogue (admin uniquement)
+ */
+router.delete('/exams/:id', authMiddleware, authorize(['admin']), labController.deleteExam);
+
 // ========== ROUTES DEMANDES ==========
 
 /**
@@ -50,6 +56,12 @@ router.post('/requests', authMiddleware, labController.createRequest);
  * Assigner une demande à un technicien
  */
 router.patch('/requests/:id/assign', authMiddleware, authorize(['admin', 'reception']), labController.assignRequest);
+
+/**
+ * DELETE /api/v1/lab/requests/:id
+ * Supprimer une demande non payée (admin uniquement)
+ */
+router.delete('/requests/:id', authMiddleware, authorize(['admin']), labController.deleteRequest);
 
 // ========== ROUTES RÉSULTATS ==========
 

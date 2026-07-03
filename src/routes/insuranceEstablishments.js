@@ -9,6 +9,7 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/insuranceEstablishmentController');
+const examPriceController = require('../controllers/insuranceExamPriceController');
 const { authMiddleware } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 
@@ -20,5 +21,11 @@ router.get('/:id', authMiddleware, controller.getById);
 router.post('/', authMiddleware, authorize(['admin']), controller.create);
 router.put('/:id', authMiddleware, authorize(['admin']), controller.update);
 router.delete('/:id', authMiddleware, authorize(['admin']), controller.delete);
+
+// Prix d'examens par assurance
+router.get('/exam-price', authMiddleware, examPriceController.getPrice);
+router.get('/:id/exam-prices', authMiddleware, examPriceController.getByInsurance);
+router.post('/:id/exam-prices', authMiddleware, authorize(['admin']), examPriceController.upsert);
+router.delete('/:id/exam-prices/:priceId', authMiddleware, authorize(['admin']), examPriceController.remove);
 
 module.exports = router;

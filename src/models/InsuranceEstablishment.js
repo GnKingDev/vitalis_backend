@@ -20,6 +20,20 @@ const InsuranceEstablishment = sequelize.define('InsuranceEstablishment', {
     allowNull: true,
     comment: 'Code court (ex: MUT-01)'
   },
+  coveragePercent: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    defaultValue: null,
+    validate: { min: 0, max: 100 },
+    comment: 'Taux de prise en charge principal (ex: 80 pour 80%)'
+  },
+  coveragePercent2: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    defaultValue: null,
+    validate: { min: 0, max: 100 },
+    comment: 'Deuxième taux de prise en charge (ex: 100 pour certains actes)'
+  },
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

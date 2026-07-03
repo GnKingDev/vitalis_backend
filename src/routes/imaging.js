@@ -24,6 +24,7 @@ router.post('/exams', authMiddleware, authorize(['admin']), imagingController.cr
  * Modifier un examen (admin uniquement)
  */
 router.put('/exams/:id', authMiddleware, authorize(['admin']), imagingController.updateExam);
+router.delete('/exams/:id', authMiddleware, authorize(['admin']), imagingController.deleteExam);
 
 // ========== ROUTES DEMANDES ==========
 
@@ -50,6 +51,7 @@ router.post('/requests', authMiddleware, imagingController.createRequest);
  * Assigner une demande à un technicien
  */
 router.patch('/requests/:id/assign', authMiddleware, authorize(['admin', 'reception']), imagingController.assignRequest);
+router.delete('/requests/:id', authMiddleware, authorize(['admin']), imagingController.deleteRequest);
 
 /**
  * PATCH /api/v1/imaging/requests/:id/complete

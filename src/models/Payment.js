@@ -69,6 +69,12 @@ const Payment = sequelize.define('Payment', {
     defaultValue: 0,
     comment: 'Montant déduit par la remise'
   },
+  acompte: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    defaultValue: 0,
+    comment: 'Avance déjà versée par le patient'
+  },
   consultationTypeIds: {
     type: DataTypes.JSON,
     allowNull: true,

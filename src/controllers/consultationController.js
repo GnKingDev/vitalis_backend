@@ -342,3 +342,38 @@ exports.archiveDossier = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Supprimer une consultation (admin uniquement)
+ * DELETE /api/v1/consultations/:id
+ */
+exports.deleteConsultation = async (req, res, next) => {
+  try {
+    const { Consultation, LabRequest, ImagingRequest, Prescription } = require('../models');
+    const { errorResponse, successResponse } = require('../utils/responseHelper');
+
+    const consultation = await Consultation.findByPk(req.params.id);
+    if (!consultation) {
+      return res.status(404).json(errorResponse('Consultation non trouvée', 404));
+    }
+
+    // Vérifier qu'aucune demande labo/imagerie avec paiement n'est liée
+    const labWithPayment = await LabRequest.findOne({
+      where: { consultationId: req.params.id, paymentId: { [require('sequelize').Op.ne]: null } }
+    });
+    const imagingWithPayment = await ImagingRequest.findOne({
+      where: { consultationId: req.params.id, paymentId: { [require('sequelize').Op.ne]: null } }
+    });
+    if (labWithPayment || imagingWithPayment) {
+      return res.status(400).json(errorResponse(
+        'Impossible de supprimer une consultation ayant des demandes déjà payées.',
+        400
+      ));
+    }
+
+    await consultation.destroy();
+    res.json(successResponse(null, 'Consultation supprimée avec succès'));
+  } catch (error) {
+    next(error);
+  }
+};

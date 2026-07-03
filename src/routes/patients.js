@@ -25,6 +25,7 @@ router.get('/:id/timeline', patientController.getPatientTimeline);
 // Routes générales
 router.get('/:id', patientController.getPatientById);
 router.post('/', patientController.createPatient);
-router.put('/:id', patientController.updatePatient); 
+router.put('/:id', patientController.updatePatient);
+router.delete('/:id', authorize(['admin']), patientController.deletePatient);
 
 module.exports = router;

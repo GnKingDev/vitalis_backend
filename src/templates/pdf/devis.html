@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, 'Helvetica Neue', sans-serif;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #333;
+      margin: 0;
+      padding: 20px;
+      background: #fff;
+    }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; }
+    .logo-block .clinique { font-size: 14px; color: #333; margin: 0; }
+    .logo-block .vitalis { font-size: 24px; font-weight: bold; color: #2563eb; margin: 2px 0 0 0; letter-spacing: 0.5px; }
+    .gradient-line { height: 4px; background: linear-gradient(to right, #dc2626 0%, #2563eb 100%); margin-top: 6px; width: 120px; border-radius: 2px; }
+    .header-right { text-align: right; }
+    .header-right h1 { font-size: 22px; font-weight: bold; color: #0f766e; margin: 0 0 4px 0; letter-spacing: 1px; }
+    .devis-badge {
+      display: inline-block;
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      color: #15803d;
+      padding: 3px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+      margin-top: 4px;
+    }
+    .header-separator { height: 4px; background: linear-gradient(to right, #dc2626 0%, #2563eb 100%); margin: 16px 0 20px 0; border-radius: 2px; }
+
+    .notice {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 8px 14px;
+      margin-bottom: 20px;
+      font-size: 11px;
+      color: #78350f;
+    }
+
+    .parties { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+    .box { border: 1px solid #d1d5db; padding: 12px 16px; flex: 1; }
+    .box-title { font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: .08em; color: #6b7280; margin-bottom: 8px; }
+    .box p { margin: 3px 0; font-size: 12px; }
+    .box strong { color: #111; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead th {
+      background: #0f766e;
+      color: #fff;
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    thead th.right { text-align: right; }
+    tbody tr:nth-child(even) td { background: #f8fafc; }
+    tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+    tbody td.right { text-align: right; }
+    tbody td.type-badge { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #4b5563; }
+
+    .totals-wrap { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .totals { width: 300px; }
+    .totals-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .totals-row.subtotal { color: #374151; }
+    .totals-row.deduction { color: #059669; }
+    .totals-row.net {
+      background: #0f766e;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 4px;
+      margin-top: 6px;
+      border: none;
+    }
+
+    .footer {
+      margin-top: 32px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 11px;
+      color: #6b7280;
+    }
+    .footer .signature { text-align: center; }
+    .footer .signature .sig-line { width: 150px; border-top: 1px solid #9ca3af; margin: 40px auto 4px; }
+  </style>
+</head>
+<body>
+  <!-- En-tête -->
+  <div class="header">
+    <div class="logo-block">
+      {{#if logoDataUri}}<img src="{{logoDataUri}}" style="height:50px;display:block;margin-bottom:4px;">{{/if}}
+      <p class="clinique">Clinique</p>
+      <p class="vitalis">VITALIS</p>
+      <div class="gradient-line"></div>
+    </div>
+    <div class="header-right">
+      <h1>DEVIS</h1>
+      <div class="devis-badge">Document non contractuel</div>
+      <div style="margin-top:6px;font-size:11px;color:#666;">N° {{devisRef}}</div>
+      <div style="font-size:12px;color:#333;">Date : {{devisDate}}</div>
+    </div>
+  </div>
+  <div class="header-separator"></div>
+
+  <div class="notice">
+    Ce devis est établi à titre indicatif. Les prix peuvent varier selon les actes définitifs réalisés.
+    Valable jusqu'au : <strong>{{validUntil}}</strong>
+  </div>
+
+  <!-- Clinique & Patient -->
+  <div class="parties">
+    <div class="box">
+      <div class="box-title">Émetteur</div>
+      <p><strong>Clinique VITALIS</strong></p>
+      <p>Conakry, République de Guinée</p>
+      <p>Tél : +224 000 000 000</p>
+    </div>
+    <div class="box">
+      <div class="box-title">Patient</div>
+      <p><strong>{{patientName}}</strong></p>
+      <p>ID : {{vitalisId}}</p>
+      {{#if patientAge}}<p>Âge : {{patientAge}} ans</p>{{/if}}
+      {{#if patientPhone}}<p>Tél : {{patientPhone}}</p>{{/if}}
+      {{#if insuranceName}}<p>Assurance : {{insuranceName}}{{#if coveragePercent}} ({{coveragePercent}}%){{/if}}</p>{{/if}}
+    </div>
+  </div>
+
+  <!-- Tableau des prestations prévues -->
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40%">Prestation prévue</th>
+        <th>Type</th>
+        <th class="right">Prix estimé</th>
+        {{#if hasInsurance}}<th class="right">Prise en charge</th>{{/if}}
+        <th class="right">Part patient</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td>{{this.label}}</td>
+        <td class="type-badge">{{this.typeLabel}}</td>
+        <td class="right">{{this.unitPrice}} GNF</td>
+        {{#if ../hasInsurance}}<td class="right" style="color:#059669;">- {{this.insurancePart}} GNF</td>{{/if}}
+        <td class="right"><strong>{{this.patientPart}} GNF</strong></td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <!-- Totaux -->
+  <div class="totals-wrap">
+    <div class="totals">
+      <div class="totals-row subtotal">
+        <span>Total brut estimé</span>
+        <span><strong>{{amountBase}} GNF</strong></span>
+      </div>
+      {{#if insuranceDeduction}}
+      <div class="totals-row deduction">
+        <span>Prise en charge assurance{{#if coveragePercent}} ({{coveragePercent}}%){{/if}}</span>
+        <span>- {{insuranceDeduction}} GNF</span>
+      </div>
+      {{/if}}
+      {{#if discountDeduction}}
+      <div class="totals-row deduction">
+        <span>Remise{{#if discountPercent}} ({{discountPercent}}%){{/if}}</span>
+        <span>- {{discountDeduction}} GNF</span>
+      </div>
+      {{/if}}
+      <div class="totals-row net">
+        <span>Estimation nette patient</span>
+        <span>{{netEstime}} GNF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pied de page -->
+  <div class="footer">
+    <div>
+      <p style="font-size:10px;color:#9ca3af;">Document généré le {{generatedDate}}</p>
+      <p style="font-size:10px;color:#9ca3af;">Ce devis ne constitue pas une facture.</p>
+    </div>
+    <div class="signature">
+      <div class="sig-line"></div>
+      <div>Signature / Cachet</div>
+    </div>
+  </div>
+</body>
+</html>

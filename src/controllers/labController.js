@@ -983,3 +983,43 @@ exports.getRequestPDF = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Supprimer une demande de laboratoire (admin uniquement)
+ * DELETE /api/v1/lab/requests/:id
+ */
+exports.deleteRequest = async (req, res, next) => {
+  try {
+    const request = await LabRequest.findByPk(req.params.id);
+    if (!request) {
+      return res.status(404).json(errorResponse('Demande de laboratoire non trouvée', 404));
+    }
+    if (request.paymentId) {
+      return res.status(400).json(errorResponse(
+        'Impossible de supprimer une demande déjà payée. Annulez d\'abord le paiement.',
+        400
+      ));
+    }
+    await request.destroy();
+    res.json(successResponse(null, 'Demande de laboratoire supprimée'));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Supprimer un examen de catalogue (admin uniquement)
+ * DELETE /api/v1/lab/exams/:id
+ */
+exports.deleteExam = async (req, res, next) => {
+  try {
+    const exam = await LabExam.findByPk(req.params.id);
+    if (!exam) {
+      return res.status(404).json(errorResponse('Examen non trouvé', 404));
+    }
+    await exam.update({ isActive: false });
+    res.json(successResponse(null, 'Examen désactivé'));
+  } catch (error) {
+    next(error);
+  }
+};

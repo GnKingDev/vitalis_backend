@@ -59,14 +59,16 @@ exports.getById = async (req, res, next) => {
  */
 exports.create = async (req, res, next) => {
   try {
-    const { name, code, isActive = true } = req.body;
+    const { name, code, isActive = true, coveragePercent, coveragePercent2 } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json(errorResponse('Le nom est requis', 400));
     }
     const establishment = await InsuranceEstablishment.create({
       name: name.trim(),
       code: code ? code.trim() : null,
-      isActive: !!isActive
+      isActive: !!isActive,
+      coveragePercent: coveragePercent != null ? parseFloat(coveragePercent) : null,
+      coveragePercent2: coveragePercent2 != null ? parseFloat(coveragePercent2) : null
     });
     res.status(201).json(successResponse(establishment));
   } catch (error) {
@@ -83,11 +85,13 @@ exports.update = async (req, res, next) => {
     if (!establishment) {
       return res.status(404).json(errorResponse('Établissement non trouvé', 404));
     }
-    const { name, code, isActive } = req.body;
+    const { name, code, isActive, coveragePercent, coveragePercent2 } = req.body;
     await establishment.update({
       ...(name !== undefined && { name: name.trim() }),
       ...(code !== undefined && { code: code ? code.trim() : null }),
-      ...(isActive !== undefined && { isActive: !!isActive })
+      ...(isActive !== undefined && { isActive: !!isActive }),
+      ...(coveragePercent !== undefined && { coveragePercent: coveragePercent != null ? parseFloat(coveragePercent) : null }),
+      ...(coveragePercent2 !== undefined && { coveragePercent2: coveragePercent2 != null ? parseFloat(coveragePercent2) : null })
     });
     res.json(successResponse(establishment));
   } catch (error) {

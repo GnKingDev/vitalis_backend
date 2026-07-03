@@ -179,6 +179,119 @@ class PDFService {
   }
 
   /**
+   * Génère le PDF d'une facture de paiement
+   */
+  async generateInvoicePDF(payment, patient, items) {
+    const { formatDate } = require('../utils/dateFormatter');
+
+    const amountBase = parseFloat(payment.amountBase || payment.amount || 0);
+    const insuranceDeduction = parseFloat(payment.insuranceDeduction || 0);
+    const discountDeduction = parseFloat(payment.discountDeduction || 0);
+    const acompte = parseFloat(payment.acompte || 0);
+    const netAPayer = amountBase - insuranceDeduction - discountDeduction - acompte;
+
+    const methodLabels = { cash: 'Espèces', orange_money: 'Orange Money' };
+    const statusLabels = { paid: 'Payé', pending: 'En attente', cancelled: 'Annulé' };
+    const statusClasses = { paid: 'status-paid', pending: 'status-pending', cancelled: 'status-cancelled' };
+
+    const insurance = patient.insuranceEstablishment;
+    const hasInsurance = !!(insurance && insuranceDeduction > 0);
+
+    const data = {
+      invoiceRef: payment.id.substring(0, 8).toUpperCase(),
+      invoiceDate: formatDate(payment.createdAt),
+      generatedDate: formatDate(new Date()),
+      patientName: `${patient.firstName} ${patient.lastName}`,
+      vitalisId: patient.vitalisId,
+      patientAge: patient.age || null,
+      patientPhone: patient.phone || null,
+      insuranceName: insurance ? insurance.name : null,
+      coveragePercent: patient.insuranceCoveragePercent ? `${patient.insuranceCoveragePercent}%` : null,
+      paymentMethod: methodLabels[payment.method] || payment.method,
+      reference: payment.reference || null,
+      statusLabel: statusLabels[payment.status] || payment.status,
+      statusClass: statusClasses[payment.status] || 'status-pending',
+      items: (items || []).map(item => {
+        const unitPrice = parseFloat(item.unitPrice || item.price || 0);
+        const coverage = parseFloat(patient.insuranceCoveragePercent || 0);
+        const insurancePart = hasInsurance ? Math.round(unitPrice * coverage / 100) : 0;
+        return {
+          label: item.label || item.name,
+          typeLabel: item.typeLabel || item.type || '',
+          unitPrice: unitPrice.toLocaleString('fr-FR'),
+          insurancePart: insurancePart.toLocaleString('fr-FR'),
+          patientPart: (unitPrice - insurancePart).toLocaleString('fr-FR')
+        };
+      }),
+      hasInsurance,
+      amountBase: amountBase.toLocaleString('fr-FR'),
+      insuranceDeduction: insuranceDeduction > 0 ? insuranceDeduction.toLocaleString('fr-FR') : null,
+      discountDeduction: discountDeduction > 0 ? discountDeduction.toLocaleString('fr-FR') : null,
+      discountPercent: patient.discountPercent || null,
+      acompte: acompte > 0 ? acompte.toLocaleString('fr-FR') : null,
+      netAPayer: Math.max(0, netAPayer).toLocaleString('fr-FR')
+    };
+
+    return await this.generatePDFFromTemplate('invoice', data);
+  }
+
+  /**
+   * Génère le PDF d'un devis prévisionnel
+   */
+  async generateDevisPDF(patient, items, options = {}) {
+    const { formatDate } = require('../utils/dateFormatter');
+
+    const insurance = patient.insuranceEstablishment;
+    const coveragePct = parseFloat(patient.insuranceCoveragePercent || (insurance && insurance.coveragePercent) || 0);
+    const discountPct = parseFloat(patient.discountPercent || 0);
+    const hasInsurance = !!(insurance && coveragePct > 0);
+
+    let amountBase = 0;
+    const enrichedItems = (items || []).map(item => {
+      const unitPrice = parseFloat(item.price || 0);
+      amountBase += unitPrice;
+      const insurancePart = hasInsurance ? Math.round(unitPrice * coveragePct / 100) : 0;
+      return {
+        label: item.label || item.name,
+        typeLabel: item.typeLabel || item.type || '',
+        unitPrice: unitPrice.toLocaleString('fr-FR'),
+        insurancePart: insurancePart.toLocaleString('fr-FR'),
+        patientPart: (unitPrice - insurancePart).toLocaleString('fr-FR')
+      };
+    });
+
+    const insuranceDeduction = hasInsurance ? Math.round(amountBase * coveragePct / 100) : 0;
+    const discountDeduction = discountPct > 0 ? Math.round((amountBase - insuranceDeduction) * discountPct / 100) : 0;
+    const netEstime = amountBase - insuranceDeduction - discountDeduction;
+
+    // Date de validité : aujourd'hui + 7 jours
+    const validDate = new Date();
+    validDate.setDate(validDate.getDate() + 7);
+
+    const data = {
+      devisRef: `DEV-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+      devisDate: formatDate(new Date()),
+      validUntil: formatDate(validDate),
+      generatedDate: formatDate(new Date()),
+      patientName: `${patient.firstName} ${patient.lastName}`,
+      vitalisId: patient.vitalisId,
+      patientAge: patient.age || null,
+      patientPhone: patient.phone || null,
+      insuranceName: insurance ? insurance.name : null,
+      coveragePercent: coveragePct > 0 ? `${coveragePct}%` : null,
+      items: enrichedItems,
+      hasInsurance,
+      amountBase: amountBase.toLocaleString('fr-FR'),
+      insuranceDeduction: insuranceDeduction > 0 ? insuranceDeduction.toLocaleString('fr-FR') : null,
+      discountDeduction: discountDeduction > 0 ? discountDeduction.toLocaleString('fr-FR') : null,
+      discountPercent: discountPct > 0 ? `${discountPct}%` : null,
+      netEstime: Math.max(0, netEstime).toLocaleString('fr-FR')
+    };
+
+    return await this.generatePDFFromTemplate('devis', data);
+  }
+
+  /**
    * Génère le PDF d'un item personnalisé (résultat labo/imagerie externe)
    */
   async generateCustomItemPDF(customItem, patient, doctor) {
